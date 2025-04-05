@@ -1,13 +1,13 @@
 // --- Game Configuration ---
 const GRAVITY_FORCE = 0.07;
 const THRUST_FORCE = 0.16;
-const TURN_SPEED = 3.0;
+const TURN_SPEED = 2.5;
 const DAMPING_FACTOR = 0.99;
-const GROUND_FRICTION = 0.95;
-const BULLET_SPEED = 6;
+const GROUND_FRICTION = 0.93;
+const BULLET_SPEED = 7;
 const SHOOT_COOLDOWN_FRAMES = 18;
 const RESPAWN_DELAY_FRAMES = 120; // Plane respawn
-const BALLOON_RESPAWN_FRAMES = 240; // Balloon respawn longer
+const BALLOON_RESPAWN_FRAMES = 360; // Balloon respawn longer
 const MAX_CLOUDS = 4;
 const CLOUD_SPEED = 0.4;
 const MIN_TAKEOFF_SPEED = 0.5;
