@@ -1,23 +1,24 @@
 // --- START OF FILE sketch.js ---
 
 // --- Game Configuration ---
-const GRAVITY_FORCE = 0.07;
+const GRAVITY_FORCE = 0.1; // Adjusted gravity
 const THRUST_FORCE = 0.16;
+const LIFT_FACTOR = 0.012; // How much lift is generated per unit of speed
 const TURN_SPEED = 2.5;
 const DAMPING_FACTOR = 0.985;
-const GROUND_FRICTION = 0.90;
-const BULLET_SPEED = 7;
+const GROUND_FRICTION = 0.95;
+const BULLET_SPEED = 10;
 const SHOOT_COOLDOWN_FRAMES = 18;
 const RESPAWN_DELAY_FRAMES = 120; // Plane respawn
 const BALLOON_RESPAWN_FRAMES = 360; // Balloon respawn longer
 const MAX_CLOUDS = 5;
 const CLOUD_BASE_SPEED = 0.3;
-const MIN_TAKEOFF_SPEED = 0.5;
+const MIN_TAKEOFF_SPEED = 1.8; // *** Increased significantly ***
 const MAX_LANDING_SPEED = 2.5;
 const MAX_PARTICLES = 150;
 const PLANE_COLLISION_THRESHOLD_FACTOR = 0.8;
 const STALL_ANGLE_THRESHOLD = -70; // Degrees relative to horizontal when upright
-const STALL_RECOVERY_ANGLE = -60;// Degrees relative to horizontal when upright
+const STALL_RECOVERY_ANGLE = -50;// Degrees relative to horizontal when upright
 const STALL_EFFECT_FACTOR = 0.2;
 const MAX_SPEED_FOR_SOUND = 8;
 // --- Adjusted Sound Parameters ---
@@ -50,6 +51,10 @@ let engineSound1, engineSound2;
 let shootSoundEnv, shootNoise;
 let explosionSoundEnv, explosionNoise;
 let audioStarted = false;
+let soundNodesStarted = false; // New flag to track if Oscillators/Noise have started
+
+// --- Game State ---
+let gameState = 'intro'; // 'intro' or 'playing'
 
 
 // --- Environment Dimensions ---
@@ -101,7 +106,7 @@ function setup() {
     calculateLayout();
 
     // Initialize Planes
-    let planeStartY = GROUND_Y - 10;
+    let planeStartY = GROUND_Y - 10; // Start slightly above visual ground line
     plane1 = new Plane(width * 0.1, planeStartY, PLANE1_COLOR_BODY, PLANE1_COLOR_WING, PLANE1_COLOR_ACCENT, CONTROLS_P1, 1);
     plane2 = new Plane(width * 0.9, planeStartY, PLANE2_COLOR_BODY, PLANE2_COLOR_WING, PLANE2_COLOR_ACCENT, CONTROLS_P2, 2);
 
@@ -112,24 +117,17 @@ function setup() {
 
     keys = {};
 
-    // --- Initialize Sounds (with new parameters) ---
+    // --- Initialize Sounds (but DO NOT start them yet) ---
     engineSound1 = new p5.Oscillator('sawtooth'); engineSound1.freq(BASE_ENGINE_FREQ); engineSound1.amp(0);
     engineSound2 = new p5.Oscillator('sawtooth'); engineSound2.freq(BASE_ENGINE_FREQ); engineSound2.amp(0);
 
-    // --- MODIFIED SHOOT SOUND ---
-    shootNoise = new p5.Noise('white'); // Use 'white' noise for a sharper sound
-    shootNoise.amp(0); // Start silent, envelope controls volume
-    shootSoundEnv = new p5.Envelope();
-    // ADSR: Attack(quick), Decay(shorter), Sustain(none), Release(shorter)
-    shootSoundEnv.setADSR(0.001, 0.02, 0, 0.04);
-    // Set Range: Max Volume (higher), Min Volume
-    shootSoundEnv.setRange(0.9, 0); // Increased max amplitude from 0.5 to 0.8
-    // --- END MODIFIED SHOOT SOUND --
+    shootNoise = new p5.Noise('white'); shootNoise.amp(0);
+    shootSoundEnv = new p5.Envelope(); shootSoundEnv.setADSR(0.001, 0.02, 0, 0.04); shootSoundEnv.setRange(0.9, 0);
 
     explosionNoise = new p5.Noise('pink'); explosionNoise.amp(0);
     explosionSoundEnv = new p5.Envelope(); explosionSoundEnv.setADSR(0.03, 0.5, 0.1, 0.7); explosionSoundEnv.setRange(0.7, 0);
 
-    // Assign engine sounds
+    // Assign engine sounds (assignment is okay, starting is not)
     plane1.assignEngineSound(engineSound1);
     plane2.assignEngineSound(engineSound2);
 }
@@ -138,10 +136,23 @@ function setup() {
 function calculateLayout() {
     GROUND_Y = height * GROUND_LEVEL_Y_FRAC; hutX = width / 2; hutY = GROUND_Y - HUT_HEIGHT / 2; hut = { x: hutX, y: hutY, w: HUT_WIDTH, h: HUT_HEIGHT };
     if (stars && stars.length > 0) { for (let star of stars) { star.x = random(width); star.y = random(height * 0.7); } }
+    // Recalculate plane start positions if needed (e.g., on resize before game starts)
+    if (gameState === 'intro') {
+        let planeStartY = GROUND_Y - 10;
+        if (plane1) plane1.startPos = createVector(width * 0.1, planeStartY);
+        if (plane2) plane2.startPos = createVector(width * 0.9, planeStartY);
+    }
 }
 
 // --- p5.js Draw Function (Main Game Loop) ---
 function draw() {
+    // --- Intro Screen Logic ---
+    if (gameState === 'intro') {
+        drawIntroScreen();
+        return; // Don't draw the game yet
+    }
+
+    // --- Playing State Logic ---
     drawBackground();
     drawEnvironment();
 
@@ -188,31 +199,151 @@ function draw() {
     drawUI();
 }
 
+// --- NEW: Draw Intro Screen ---
+function drawIntroScreen() {
+    drawBackground(); // Draw the same nice background
+    drawEnvironment(); // Draw mountains and ground too
+
+    // Semi-transparent overlay to make text pop
+    fill(0, 0, 0, 150);
+    rect(width / 2, height / 2, width, height);
+
+    // Title
+    textFont('monospace');
+    fill(255, 215, 0); // Gold-ish color
+    stroke(0);
+    strokeWeight(4);
+    textSize(min(width * 0.1, height * 0.15)); // Responsive text size
+    textAlign(CENTER, CENTER);
+    text("Biplane Battle", width / 2, height * 0.2);
+
+    // Instructions
+    noStroke();
+    fill(240);
+    textSize(min(width * 0.025, height * 0.04)); // Smaller text for instructions
+    let instrY = height * 0.45;
+    let lineSpacing = height * 0.05;
+    let col1X = width * 0.3;
+    let col2X = width * 0.7;
+
+    // Player 1 Instructions
+    fill(PLANE1_COLOR_BODY);
+    text("Player 1", col1X, instrY);
+    fill(240);
+    text("W: Thrust", col1X, instrY + lineSpacing);
+    text("A: Turn Left", col1X, instrY + lineSpacing * 2);
+    text("D: Turn Right", col1X, instrY + lineSpacing * 3);
+    text("S: Shoot", col1X, instrY + lineSpacing * 4);
+
+    // Player 2 Instructions
+    fill(PLANE2_COLOR_BODY);
+    text("Player 2", col2X, instrY);
+    fill(240);
+    text("Up Arrow: Thrust", col2X, instrY + lineSpacing);
+    text("Left Arrow: Turn Left", col2X, instrY + lineSpacing * 2);
+    text("Right Arrow: Turn Right", col2X, instrY + lineSpacing * 3);
+    text("Down Arrow: Shoot", col2X, instrY + lineSpacing * 4);
+
+    // Start Prompt
+    fill(255, 255, 100);
+    textSize(min(width * 0.03, height * 0.05));
+    // Blinking effect for the prompt
+    if (floor(frameCount / 20) % 2 === 0) {
+        text("Press any key to start", width / 2, height * 0.85);
+    }
+
+    noStroke();
+}
+
+
 // --- Input Handling ---
-function keyPressed() { keys[keyCode] = true; }
-function keyReleased() { keys[keyCode] = false; }
+function keyPressed() {
+    // --- Handle Intro Screen Transition ---
+    if (gameState === 'intro') {
+        gameState = 'playing'; // Change state to start the game
+
+        // Start the sound nodes *only* if the user has already clicked to enable audio
+        if (audioStarted && !soundNodesStarted) {
+            try {
+                 engineSound1.start();
+                 engineSound2.start();
+                 shootNoise.start();
+                 explosionNoise.start();
+                 soundNodesStarted = true; // Mark sounds as started
+                 console.log("Sound nodes started via key press after audio context was ready.");
+            } catch (e) {
+                console.error("Error starting sound nodes on key press:", e);
+            }
+        } else if (!audioStarted) {
+            console.log("Key pressed to start game, but audio context not yet running (click the screen).");
+        }
+        // Don't set keys[keyCode] = true here, wait for next frame in 'playing' state
+        return; // Prevent immediate key registration in the game logic
+    }
+
+    // --- Handle In-Game Key Presses ---
+    if (gameState === 'playing') {
+        keys[keyCode] = true;
+    }
+}
+
+function keyReleased() {
+    // Only release keys if the game is playing
+    if (gameState === 'playing') {
+        keys[keyCode] = false;
+    }
+}
 
 // --- Fullscreen & Audio Start ---
 function mousePressed() {
+  // Attempt to start audio context on first click (required by browsers)
   if (!audioStarted && getAudioContext().state !== 'running') {
-     console.log("Attempting to start audio...");
+     console.log("Attempting to start audio context...");
      userStartAudio().then(() => {
         if (getAudioContext().state === 'running') {
-            console.log("Audio Context is running. Starting sound nodes...");
-            engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start();
-            audioStarted = true;
-            console.log("Sound nodes started.");
+            console.log("Audio Context is now running.");
+            audioStarted = true; // Mark audio as enabled
+            // Start sound nodes ONLY if the game has already transitioned to 'playing'
+            if (gameState === 'playing' && !soundNodesStarted) {
+                 try {
+                    engineSound1.start();
+                    engineSound2.start();
+                    shootNoise.start();
+                    explosionNoise.start();
+                    soundNodesStarted = true;
+                    console.log("Sound nodes started via mouse press because game was already playing.");
+                 } catch (e) {
+                     console.error("Error starting sound nodes on mouse press:", e);
+                 }
+            }
         } else { console.error("Audio context failed to resume or start."); }
      }).catch(e => { console.error("Error starting audio:", e); });
   } else if (!audioStarted && getAudioContext().state === 'running') {
-      console.log("Audio Context was already running. Starting sound nodes...");
-      engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start();
+      // This case handles if audio context was somehow running before first click
+      console.log("Audio Context was already running. Marking audio as started.");
       audioStarted = true;
-      console.log("Sound nodes started.");
+      // Start sound nodes ONLY if the game has already transitioned to 'playing'
+      if (gameState === 'playing' && !soundNodesStarted) {
+           try {
+               engineSound1.start();
+               engineSound2.start();
+               shootNoise.start();
+               explosionNoise.start();
+               soundNodesStarted = true;
+               console.log("Sound nodes started via mouse press (audio context was already running).");
+           } catch (e) {
+                console.error("Error starting sound nodes on mouse press (pre-existing context):", e);
+           }
+      }
   }
 
-  if (mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) { let fs = fullscreen(); fullscreen(!fs); }
+  // Toggle fullscreen on click anywhere
+  if (mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) {
+       let fs = fullscreen();
+       fullscreen(!fs);
+   }
 }
+
 
 // --- Window Resize Handling ---
 function windowResized() { resizeCanvas(windowWidth, windowHeight); calculateLayout(); }
@@ -247,7 +378,6 @@ class Plane {
         this.isTurningLeft = false; // Based on key press
         this.isTurningRight = false;// Based on key press
         this.planePoints = this.createPlaneShape();
-        //this.propellerAngle = 0; // Replaced by blur effect
         this.engineSound = null;
         this.isStalled = false;
     }
@@ -270,6 +400,8 @@ class Plane {
     }
 
     handleInput(keys) {
+        // This function now only *reads* the keys state.
+        // It's called even if the plane isn't alive, but the effects are ignored later.
         if (!this.isAlive || this.respawnTimer > 0) {
             this.isThrusting = false;
             this.isTurningLeft = false;
@@ -277,9 +409,6 @@ class Plane {
             return;
         }
         this.isThrusting = keys[this.controls.thrust] || false;
-        // Note: 'left' and 'right' keys correspond directly to angle change direction
-        // P1: A decreases angle (turn left), D increases angle (turn right)
-        // P2: Left Arrow decreases angle (turn up when facing left), Right Arrow increases angle (turn down when facing left)
         this.isTurningLeft = keys[this.controls.left] || false;
         this.isTurningRight = keys[this.controls.right] || false;
 
@@ -291,117 +420,140 @@ class Plane {
     update() {
         // Respawn Logic
         if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; }
-        if (!this.isAlive) { if (this.engineSound && audioStarted) this.engineSound.amp(0, 0.05); return; }
+        if (!this.isAlive) { if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05); return; } // Ensure sound nodes have started before trying to control amp
         if (this.shootCooldown > 0) { this.shootCooldown--; }
 
         // --- Apply Turning ---
-        // Standard angle convention: counter-clockwise is negative change
         if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
         if (this.isTurningRight) { this.angle += TURN_SPEED; }
 
-        // --- Determine Forces ---
-        let effectiveGravity = GRAVITY_FORCE;
+        // --- Determine Thrust ---
         let thrustVector = createVector(0, 0);
         let currentThrustForce = THRUST_FORCE;
         if (this.isStalled) { currentThrustForce *= STALL_EFFECT_FACTOR; }
         if (this.isThrusting) {
-            // Thrust is always applied in the direction the plane is *currently* pointing
             thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce);
         }
 
         // --- Apply Forces based on state ---
         if (this.isOnGround) {
+            // --- Ground Physics ---
             this.velocity.x *= GROUND_FRICTION;
-            // Apply horizontal thrust and a small vertical component if angled up
             let normalizedAngle = (this.angle % 360 + 360) % 360;
-            let isAngledUpSlightly = false;
-            if (this.id === 1) {
-                 isAngledUpSlightly = (this.angle < -5 && this.angle > -90);
-            } else { // P2
-                 isAngledUpSlightly = (normalizedAngle > 185 && normalizedAngle < 270);
+            let isAngledUpSlightly = (this.id === 1) ? (this.angle < -5 && this.angle > -90) : (normalizedAngle > 185 && normalizedAngle < 270);
+
+            // Apply thrust based on angle and thrusting state
+            if (this.isThrusting) {
+                if (isAngledUpSlightly) {
+                    // Apply thrust with a small vertical component for takeoff run
+                    this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15)); // Small up component
+                } else {
+                    // Apply only horizontal thrust component if not angled up
+                    this.applyForce(createVector(thrustVector.x, 0));
+                }
             }
 
-            if (isAngledUpSlightly) {
-                 this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.1)); // Apply small vertical thrust portion
-            } else {
-                 this.applyForce(createVector(thrustVector.x, 0)); // Only horizontal thrust if flat/inverted/down
-            }
+            // Apply gravity firmly on the ground unless trying to take off actively
+             if (!this.isThrusting || !isAngledUpSlightly) {
+                 this.applyForce(createVector(0, GRAVITY_FORCE * 2)); // Stronger gravity effect when not trying takeoff
+             } else {
+                 // Lighter gravity only when actively thrusting AND angled up
+                 this.applyForce(createVector(0, GRAVITY_FORCE * 0.5));
+             }
 
-            // Apply gravity unless trying to take off
-            if (!this.isThrusting || !isAngledUpSlightly) {
-                this.applyForce(createVector(0, effectiveGravity));
+        } else {
+            // --- Airborne Physics ---
+            // 1. Apply Thrust
+            this.applyForce(thrustVector);
+            // 2. Calculate Lift
+            let speed = this.velocity.mag();
+            let liftMagnitude = speed * LIFT_FACTOR;
+            // Stall Effect on Lift
+            if (this.isStalled) {
+                liftMagnitude *= 0.15;
             }
-        }
-        else { // Airborne
-            this.applyForce(thrustVector); // Apply full thrust vector
-            this.applyForce(createVector(0, effectiveGravity)); // Apply gravity
-            this.velocity.mult(DAMPING_FACTOR); // Apply air drag
+            // 3. Apply Lift
+            let liftForce = createVector(0, -liftMagnitude);
+            this.applyForce(liftForce);
+            // 4. Apply Gravity
+            this.applyForce(createVector(0, GRAVITY_FORCE));
+            // 5. Apply Air Drag
+            this.velocity.mult(DAMPING_FACTOR);
         }
 
         // Update Position
         this.position.add(this.velocity);
 
         // --- Check and Handle Ground Interaction / State Changes ---
-        let groundCheckY = GROUND_Y - this.size * 0.8; // Point where wheels touch
-        if (this.position.y >= groundCheckY) {
-             // --- Landing/Crash Detection ---
-             if (!this.isOnGround) { // Was airborne last frame? Check for landing/crash
-                 let normalizedAngle = (this.angle % 360 + 360) % 360;
-                 // Check if angle is too steep (roughly > 45 deg from horizontal)
-                 let isTooSteep = (normalizedAngle > 45 && normalizedAngle < 135) || (normalizedAngle > 225 && normalizedAngle < 315);
+        let groundCheckY = GROUND_Y - this.size * 0.8; // Position where wheels touch ground
 
-                 if (this.velocity.y > MAX_LANDING_SPEED || isTooSteep) {
-                     console.log(`Plane ${this.id} CRASH LANDED! Speed: ${this.velocity.y.toFixed(2)}, Angle: ${this.angle.toFixed(1)}, TooSteep: ${isTooSteep}`);
-                     this.hit(true); return; // Stop update if crashed
-                 } else {
-                     // Safe landing
-                     this.isOnGround = true;
-                     this.isStalled = false; // Recover from stall on landing
-                     console.log(`Plane ${this.id} landed safely.`);
-                 }
-             }
-             // --- Ground Clamping & State Update ---
-             this.isOnGround = true;
-             this.position.y = groundCheckY;
-             this.velocity.y = 0; // Stop vertical movement
-
-             // --- Takeoff Check ---
-             let speed = this.velocity.mag();
-             let isAngledForTakeoff = false;
+        // A: Transitioning from Air to Ground (Landing/Crash)
+        // Check if plane's *new* position is at or below ground AND it *was* airborne last frame
+        if (this.position.y >= groundCheckY && !this.isOnGround) {
              let normalizedAngle = (this.angle % 360 + 360) % 360;
-             if (this.id === 1) {
-                 // P1 takeoff angle: Roughly -5 to -85 degrees
-                 isAngledForTakeoff = (this.angle < -5 && this.angle > -85);
-             } else { // P2
-                 // P2 takeoff angle: Roughly 185 to 265 degrees
-                 isAngledForTakeoff = (normalizedAngle > 185 && normalizedAngle < 265);
-             }
+             let isTooSteep = (normalizedAngle > 45 && normalizedAngle < 135) || (normalizedAngle > 225 && normalizedAngle < 315);
+             let verticalSpeed = this.velocity.y; // Vertical speed at impact
 
-             if (this.isThrusting && isAngledForTakeoff && speed > MIN_TAKEOFF_SPEED) {
-                 this.isOnGround = false;
-                 this.isStalled = false;
-                 this.velocity.y -= THRUST_FORCE * 0.6; // Give a little takeoff boost
-                 console.log(`Plane ${this.id} took off.`);
+             if (verticalSpeed > MAX_LANDING_SPEED || isTooSteep) {
+                 console.log(`Plane ${this.id} CRASH LANDED! V Speed: ${verticalSpeed.toFixed(2)}, Angle: ${this.angle.toFixed(1)}, TooSteep: ${isTooSteep}`);
+                 this.hit(true); return; // Stop update if crashed
+             } else {
+                 // Safe landing
+                 this.isOnGround = true; // Set state to grounded
+                 this.isStalled = false; // Recover from stall on landing
+                 this.position.y = groundCheckY; // Snap precisely to ground level
+                 this.velocity.y = 0; // Stop all vertical movement immediately
+                 console.log(`Plane ${this.id} landed safely. V Speed: ${verticalSpeed.toFixed(2)}`);
+                 // Horizontal velocity is preserved (affected by friction next frame)
              }
-        } else {
-            // --- Airborne State Update ---
-            this.isOnGround = false;
+        // B: Currently on Ground (Check for Takeoff or stay grounded)
+        // Check if plane *was* on ground last frame
+        } else if (this.isOnGround) {
+            // Keep plane clamped to ground if position update somehow put it below
+            if (this.position.y > groundCheckY) {
+                 this.position.y = groundCheckY; // Clamp to ground
+                 if(this.velocity.y > 0) this.velocity.y = 0; // Stop any residual downward movement
+            }
 
-            // --- Stall Check (Only when airborne) ---
-            let normAngle = (this.angle % 360 + 360) % 360;
-            let checkAngle = this.angle; // Use raw angle for comparisons involving negative values
-            let isTryingStall = false;
-            let isTryingRecover = false;
+            // Takeoff Check (Only if still considered on ground)
+            let horizontalSpeed = abs(this.velocity.x);
+            let isAngledForTakeoff = false;
+            let normalizedAngle = (this.angle % 360 + 360) % 360;
+            if (this.id === 1) { // P1 takeoff angle: Roughly -5 to -85 degrees
+                isAngledForTakeoff = (this.angle < -5 && this.angle > -85);
+            } else { // P2 takeoff angle: Roughly 185 to 265 degrees
+                isAngledForTakeoff = (normalizedAngle > 185 && normalizedAngle < 265);
+            }
+
+            // Check conditions for takeoff
+            if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED) {
+                // *** Successful Takeoff ***
+                this.isOnGround = false; // Set state to airborne HERE
+                this.isStalled = false;
+                // Give a substantial upward boost to counteract gravity initially
+                this.velocity.y -= THRUST_FORCE * 0.6; // Increased boost
+                console.log(`Plane ${this.id} took off. Speed: ${horizontalSpeed.toFixed(2)}`);
+                // Now it's airborne, next frame airborne physics will apply
+            }
+            // No 'else' needed here - if takeoff conditions aren't met, it just stays grounded
+            // and ground physics will apply next frame. The clamping above keeps it on the ground.
+
+        // C: Currently Airborne
+        // Check if plane is above ground and *was not* on ground last frame (or just took off)
+        } else { // Plane is airborne (this.position.y < groundCheckY)
+            this.isOnGround = false; // Ensure state remains airborne
+
+             // Stall Check (Only when airborne)
+             let normAngle = (this.angle % 360 + 360) % 360;
+             let checkAngle = this.angle;
+             let isTryingStall = false;
+             let isTryingRecover = false;
 
              if (normAngle > 90 && normAngle < 270) { // Mostly inverted
-                // Stall if nose points too far "up" relative to inverted flight (angle > 250)
                 isTryingStall = normAngle > (180 - STALL_ANGLE_THRESHOLD);
-                // Recover if nose points less "up" relative to inverted flight (angle < 240)
                 isTryingRecover = normAngle < (180 - STALL_RECOVERY_ANGLE);
             } else { // Mostly upright
-                // Stall if nose points too far up (angle < -70)
                 isTryingStall = checkAngle < STALL_ANGLE_THRESHOLD;
-                // Recover if nose points less up (angle > -60)
                 isTryingRecover = checkAngle > STALL_RECOVERY_ANGLE;
             }
 
@@ -412,52 +564,51 @@ class Plane {
                  if (this.isStalled) console.log(`Plane ${this.id} recovered from stall. Angle: ${checkAngle.toFixed(1)} Norm: ${normAngle.toFixed(1)}`);
                  this.isStalled = false;
             }
-            // If neither condition met, stall state remains unchanged.
+             // Stall state persists if neither condition is met
         }
 
         // --- Boundary Constraints ---
         if (this.position.x > width + this.size) { this.position.x = -this.size; } else if (this.position.x < -this.size) { this.position.x = width + this.size; }
-        // Re-check ground clamp after velocity/position updates might cause penetration
-        if (this.position.y > groundCheckY && this.isOnGround){ this.position.y = groundCheckY; this.velocity.y = 0; }
         // Ceiling boundary
         if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
 
+        // --- Collisions & Sound (after position/state finalized for the frame) ---
+        // Check if plane is still alive after potential landing crash
+        if (!this.isAlive) return;
+
         // Check Hut Collision
-        this.checkCollisionHut(hut); // Check this *before* balloon collision potentially kills the plane
+        if (this.checkCollisionHut(hut)) return; // Stop update if hit hut
 
-        // --- Check Balloon Collision ---
-        // Check only if this plane and the balloon are both currently alive
+        // Check Balloon Collision (re-check isAlive)
         if (this.isAlive && balloon.isAlive) {
-            let planeCollisionRadius = this.size * 0.9; // Slightly larger radius for plane vs balloon
+            let planeCollisionRadius = this.size * 0.9;
             let distance = dist(this.position.x, this.position.y, balloon.pos.x, balloon.pos.y);
-            let combinedRadius = planeCollisionRadius + balloon.radius; // Plane radius + balloon envelope radius
-
+            let combinedRadius = planeCollisionRadius + balloon.radius;
             if (distance < combinedRadius) {
                 console.log(`Plane ${this.id} crashed into balloon!`);
-                this.hit(true); // Plane crashes, uses crash scoring (point for other player)
-                // Note: The balloon is NOT destroyed by this collision, only by bullets.
-                // Do not proceed further in update if hit
-                return;
+                this.hit(true);
+                return; // Stop update if hit balloon
             }
         }
-        // --- End Balloon Collision Check ---
 
-        // --- Update Engine Sound (only if still alive after checks) ---
-        if (this.isAlive && this.engineSound && audioStarted) {
+        // --- Update Engine Sound ---
+        // Only update sound if audio context is ready AND sound nodes have been started
+        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) {
              let speed = this.velocity.mag();
              let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
              let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
-             if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; }
-             // Prevent sound clicking off/on rapidly near zero amp
+             if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; } // Stall sound effect
              if (abs(this.engineSound.getAmp() - targetAmp) > 0.001 || targetAmp > 0.01) {
                  this.engineSound.amp(targetAmp, 0.1);
-             } else if (targetAmp < 0.01 && this.engineSound.getAmp() > 0) { // Only ramp down if currently audible
-                  this.engineSound.amp(0, 0.1); // Ensure it goes fully silent if needed
+             } else if (targetAmp < 0.01 && this.engineSound.getAmp() > 0) {
+                  this.engineSound.amp(0, 0.1);
              }
              this.engineSound.freq(targetFreq, 0.1);
-        } else if (this.engineSound && !audioStarted) {
-             this.engineSound.amp(0);
+        } else if (this.engineSound && this.engineSound.getAmp() > 0) {
+            // If audio isn't started/ready, ensure the sound is silent
+             this.engineSound.amp(0, 0.1);
         }
+
     } // End of update()
 
     display() {
@@ -506,7 +657,8 @@ class Plane {
              }
 
             // Draw Wheels
-            if (this.isOnGround || (!this.isOnGround && this.position.y > GROUND_Y - this.size * 5) || (!this.isOnGround && this.velocity.y > 0.5)) {
+            // Adjusted condition: Draw if on ground, or if airborne but close to ground OR moving down significantly
+            if (this.isOnGround || (!this.isOnGround && this.position.y > GROUND_Y - this.size * 3) || (!this.isOnGround && this.velocity.y > 0.3)) {
                  fill(40); noStroke();
                  ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2);
                  ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2);
@@ -526,7 +678,7 @@ class Plane {
             if (engineRunning) {
                 fill(PROPELLER_BLUR_COLOR);
                 ellipse(noseX, 0, propWidthRunning, propHeight);
-            } else if (!this.isOnGround) {
+            } else if (!this.isOnGround) { // Only draw stopped prop if airborne AND not running
                 fill(PROPELLER_STOPPED_COLOR);
                 rect(noseX, 0, propWidthStopped, propHeight);
             }
@@ -550,7 +702,8 @@ class Plane {
         }
         let canShoot = !this.isOnGround || (this.isOnGround && isAngledForShootingOnGround);
 
-        if (this.shootCooldown <= 0 && this.isAlive && canShoot) {
+        // Can only shoot if cooldown is ready, plane alive, conditions met, AND audio/sounds are ready
+        if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
             // Calculate bullet origin at the nose of the plane
             let noseOffsetDistance = this.size * 0.9;
             let noseOffsetVector = createVector(noseOffsetDistance, 0); // Offset along plane's local X axis
@@ -570,7 +723,7 @@ class Plane {
 
             // Reset cooldown and play sound
             this.shootCooldown = SHOOT_COOLDOWN_FRAMES;
-            if (audioStarted) { shootSoundEnv.play(shootNoise); }
+            shootSoundEnv.play(shootNoise); // Play sound only if check passed
         }
     }
 
@@ -578,7 +731,6 @@ class Plane {
          if (!this.isAlive || this.respawnTimer > 0) return false;
 
          // --- Accurate Collision Check using Rotated Bounding Box ---
-         // 1. Define plane's corners in local space (relative to center 0,0)
          let s = this.size;
          let halfW = s * 1.2; // Approximate half-width
          let halfH = s * 0.75; // Approximate half-height
@@ -586,28 +738,20 @@ class Plane {
             createVector(-halfW, -halfH), createVector( halfW, -halfH),
             createVector( halfW,  halfH), createVector(-halfW,  halfH)
          ];
-
-         // 2. Transform corners to world space, accounting for P2 flip
-         let scaleX = (this.id === 2) ? -1 : 1; // P2 is flipped in display, but physics use normal coords
-         // CORRECTION: The physics use the standard angle. The flip is ONLY for display. Collision check needs the non-flipped geometry rotated by the actual angle.
          let cornersWorld = cornersLocal.map(p => {
-             let rotatedP = p.copy().rotate(this.angle); // Rotate local point by plane angle
-             return p5.Vector.add(this.position, rotatedP); // Add world position
+             let rotatedP = p.copy().rotate(this.angle);
+             return p5.Vector.add(this.position, rotatedP);
          });
-
-         // 3. Check collision: AABB of the plane's rotated box vs AABB of the hut
          let minX = min(cornersWorld.map(p => p.x));
          let maxX = max(cornersWorld.map(p => p.x));
          let minY = min(cornersWorld.map(p => p.y));
          let maxY = max(cornersWorld.map(p => p.y));
-
          let hutMinX = hutRect.x - hutRect.w / 2;
          let hutMaxX = hutRect.x + hutRect.w / 2;
          let hutMinY = hutRect.y - hutRect.h / 2;
          let hutMaxY = hutRect.y + hutRect.h / 2;
 
          if (maxX > hutMinX && minX < hutMaxX && maxY > hutMinY && minY < hutMaxY) {
-            // AABB overlap detected. More precise check (like SAT) could go here if needed.
             console.log(`Plane ${this.id} hit hut!`);
             this.hit(true);
             return true;
@@ -617,16 +761,15 @@ class Plane {
 
     hit(causedByCrash) {
         if (!this.isAlive) return;
-        console.log(`Plane ${this.id} HIT! ${causedByCrash ? "(Crash/Hut/Plane/Balloon)" : "(Bullet)"}`); // Updated log message
+        console.log(`Plane ${this.id} HIT! ${causedByCrash ? "(Crash/Hut/Plane/Balloon)" : "(Bullet)"}`);
         this.isAlive = false;
-        this.isOnGround = false; // No longer constrained by ground
+        this.isOnGround = false;
         this.isStalled = false;
         this.velocity = createVector(random(-1.5, 1.5), -2.5); // Explosion impulse
         this.respawnTimer = RESPAWN_DELAY_FRAMES;
-        createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
-        if (this.engineSound && audioStarted) this.engineSound.amp(0, 0.05);
+        createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS); // Explosion sound handled in createExplosion
+        if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05); // Silence engine
         if (causedByCrash) {
-            // Score awarded to the *other* player on a crash (ground, hut, plane-plane, or balloon)
             if (this.id === 1) { score2++; console.log("Crash! Point for Player 2!"); }
             else { score1++; console.log("Crash! Point for Player 1!"); }
         }
@@ -638,15 +781,16 @@ class Plane {
         this.startPos = createVector(startX, startY);
         this.position = this.startPos.copy();
         this.velocity = createVector(0, 0);
-        this.angle = (this.id === 2) ? 180 : 0; // Reset angle based on ID (P2 faces left)
+        this.angle = (this.id === 2) ? 180 : 0;
         this.isAlive = true;
         this.isOnGround = true; // Start on the ground
         this.isStalled = false;
-        this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2; // Give half cooldown on respawn
+        this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2;
         console.log(`Plane ${this.id} Respawned.`);
-        if (this.engineSound && audioStarted) {
+        // Reset engine sound to base state if audio is ready
+        if (this.engineSound && audioStarted && soundNodesStarted) {
             this.engineSound.freq(BASE_ENGINE_FREQ, 0.1);
-            this.engineSound.amp(BASE_ENGINE_AMP, 0.1); // Start with base engine sound
+            this.engineSound.amp(BASE_ENGINE_AMP, 0.1);
         }
     }
 }
@@ -826,8 +970,6 @@ class Balloon {
     }
 
     display() {
-         // Always draw the balloon if it's alive OR if it's respawning but should be flickering
-         let shouldDraw = this.isAlive || (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0);
          // Use the respawn timer to control visibility when respawning
          if (this.respawnTimer > 0 && !this.isAlive) {
              if (floor(this.respawnTimer / 8) % 2 !== 0) {
@@ -978,8 +1120,8 @@ class Balloon {
 // --- Helper Function to Create Explosions ---
 // ===============================================
  function createExplosion(x, y, count, colors) {
-     // Play explosion sound if audio is ready
-     if (audioStarted) {
+     // Play explosion sound ONLY if audio context is ready AND sound nodes started
+     if (audioStarted && soundNodesStarted) {
          explosionSoundEnv.play(explosionNoise);
      }
 
