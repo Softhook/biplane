@@ -153,7 +153,14 @@ function draw() {
         bullets[i].update();
         if (plane1.isAlive && bullets[i].checkCollision(plane1)) { if (bullets[i].ownerId !== plane1.id) { plane1.hit(false); score2++; createExplosion(plane1.position.x, plane1.position.y, 35, EXPLOSION_COLORS); bullets.splice(i, 1); continue; } }
         if (plane2.isAlive && bullets[i].checkCollision(plane2)) { if (bullets[i].ownerId !== plane2.id) { plane2.hit(false); score1++; createExplosion(plane2.position.x, plane2.position.y, 35, EXPLOSION_COLORS); bullets.splice(i, 1); continue; } }
-        if (balloon.isAlive && balloon.checkCollision(bullets[i])) { createExplosion(balloon.pos.x, balloon.pos.y, 20, EXPLOSION_COLORS.slice(0,3)); balloon.hit(); if (bullets[i].ownerId === 1) { score1++; } else { score2++; } bullets.splice(i, 1); continue; }
+        // Check bullet collision with balloon *before* hut/offscreen checks
+        if (balloon.isAlive && balloon.checkCollision(bullets[i])) {
+            createExplosion(balloon.pos.x, balloon.pos.y, 20, EXPLOSION_COLORS.slice(0,3)); // Balloon explosion uses fewer colors
+            balloon.hit(); // Balloon is destroyed by bullet
+            if (bullets[i].ownerId === 1) { score1++; } else { score2++; } // Award point to shooter
+            bullets.splice(i, 1); // Remove bullet
+            continue; // Stop processing this bullet
+        }
         if (bullets[i].checkCollisionHut(hut)) { createExplosion(bullets[i].position.x, bullets[i].position.y, 5, [[150,120,90],[80,55,35],[100,100,100,100]]); bullets.splice(i, 1); continue; }
         if (bullets[i].isOffscreen()) { bullets.splice(i, 1); } else { bullets[i].display(); }
     }
@@ -175,7 +182,7 @@ function draw() {
 
     // Scenery
     for (let cloud of clouds) { cloud.update(); cloud.display(); }
-    balloon.update(); balloon.display();
+    balloon.update(); balloon.display(); // Balloon update/display happens regardless of hits this frame
     drawHut();
 
     drawUI();
@@ -416,10 +423,27 @@ class Plane {
         if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
 
         // Check Hut Collision
-        this.checkCollisionHut(hut);
+        this.checkCollisionHut(hut); // Check this *before* balloon collision potentially kills the plane
 
-        // --- Update Engine Sound ---
-        if (this.engineSound && audioStarted) {
+        // --- Check Balloon Collision ---
+        // Check only if this plane and the balloon are both currently alive
+        if (this.isAlive && balloon.isAlive) {
+            let planeCollisionRadius = this.size * 0.9; // Slightly larger radius for plane vs balloon
+            let distance = dist(this.position.x, this.position.y, balloon.pos.x, balloon.pos.y);
+            let combinedRadius = planeCollisionRadius + balloon.radius; // Plane radius + balloon envelope radius
+
+            if (distance < combinedRadius) {
+                console.log(`Plane ${this.id} crashed into balloon!`);
+                this.hit(true); // Plane crashes, uses crash scoring (point for other player)
+                // Note: The balloon is NOT destroyed by this collision, only by bullets.
+                // Do not proceed further in update if hit
+                return;
+            }
+        }
+        // --- End Balloon Collision Check ---
+
+        // --- Update Engine Sound (only if still alive after checks) ---
+        if (this.isAlive && this.engineSound && audioStarted) {
              let speed = this.velocity.mag();
              let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
              let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
@@ -593,7 +617,7 @@ class Plane {
 
     hit(causedByCrash) {
         if (!this.isAlive) return;
-        console.log(`Plane ${this.id} HIT! ${causedByCrash ? "(Crash/Hut/PlaneCollision)" : "(Bullet)"}`);
+        console.log(`Plane ${this.id} HIT! ${causedByCrash ? "(Crash/Hut/Plane/Balloon)" : "(Bullet)"}`); // Updated log message
         this.isAlive = false;
         this.isOnGround = false; // No longer constrained by ground
         this.isStalled = false;
@@ -602,7 +626,7 @@ class Plane {
         createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
         if (this.engineSound && audioStarted) this.engineSound.amp(0, 0.05);
         if (causedByCrash) {
-            // Score awarded to the *other* player on a crash
+            // Score awarded to the *other* player on a crash (ground, hut, plane-plane, or balloon)
             if (this.id === 1) { score2++; console.log("Crash! Point for Player 2!"); }
             else { score1++; console.log("Crash! Point for Player 1!"); }
         }
@@ -765,7 +789,8 @@ class Balloon {
         this.bobbleOffset = 0;
         this.bobbleSpeed = 0.6; // How fast it bobs
         this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); // Sideways drift
-        this.radius = 30; // Radius of the balloon envelope
+        this.radius = 30; // Radius of the balloon envelope for collision
+        this.visualRadius = 30; // Visual radius can differ slightly if needed
         this.basketSize = { w: 25, h: 18 };
         this.ropeLength = 25;
         this.isAlive = true;
@@ -780,7 +805,7 @@ class Balloon {
             }
             return; // Do nothing else if waiting to respawn
         }
-        if (!this.isAlive) return; // Do nothing if dead
+        if (!this.isAlive) return; // Do nothing if dead (waiting for respawn timer)
 
         // Bobble up and down
         this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; // Oscillate vertically
@@ -789,10 +814,10 @@ class Balloon {
         this.basePos.x += this.driftSpeed;
 
         // Wrap around screen edges
-        if (this.driftSpeed > 0 && this.basePos.x > width + this.radius * 2) {
-            this.basePos.x = -this.radius * 2;
-        } else if (this.driftSpeed < 0 && this.basePos.x < -this.radius * 2) {
-            this.basePos.x = width + this.radius * 2;
+        if (this.driftSpeed > 0 && this.basePos.x > width + this.visualRadius * 2) {
+            this.basePos.x = -this.visualRadius * 2;
+        } else if (this.driftSpeed < 0 && this.basePos.x < -this.visualRadius * 2) {
+            this.basePos.x = width + this.visualRadius * 2;
         }
 
         // Update actual position based on drift and bobble
@@ -801,23 +826,33 @@ class Balloon {
     }
 
     display() {
-        if (!this.isAlive || this.respawnTimer > 0) return; // Don't draw if dead or respawning invisibly
+         // Always draw the balloon if it's alive OR if it's respawning but should be flickering
+         let shouldDraw = this.isAlive || (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0);
+         // Use the respawn timer to control visibility when respawning
+         if (this.respawnTimer > 0 && !this.isAlive) {
+             if (floor(this.respawnTimer / 8) % 2 !== 0) {
+                 return; // Skip drawing for flickering effect
+             }
+         } else if (!this.isAlive && this.respawnTimer <= 0) {
+              return; // Don't draw if dead and not respawning
+         }
+
 
         push();
         translate(this.pos.x, this.pos.y);
         noStroke();
 
         // --- Basket Details ---
-        let basketTopY = this.radius * 0.8 + this.ropeLength;
+        let basketTopY = this.visualRadius * 0.8 + this.ropeLength;
         let basketBottomY = basketTopY + this.basketSize.h;
         let basketCenterX = 0;
 
         // Ropes
         stroke(BALLOON_ROPE);
         strokeWeight(1.5);
-        line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.radius * 0.5, this.radius * 0.7); // Left rope
-        line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.radius * 0.5, this.radius * 0.7); // Right rope
-        line(basketCenterX, basketTopY - 3, 0, this.radius * 0.8); // Center rope (visual)
+        line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.visualRadius * 0.5, this.visualRadius * 0.7); // Left rope
+        line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.visualRadius * 0.5, this.visualRadius * 0.7); // Right rope
+        line(basketCenterX, basketTopY - 3, 0, this.visualRadius * 0.8); // Center rope (visual)
 
         // Basket Base
         fill(BALLOON_BASKET);
@@ -846,7 +881,7 @@ class Balloon {
             fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); // Cycle through colors
             // Draw each panel as a pie slice (arc)
             arc(0, 0, // Center
-                this.radius * 2.1, this.radius * 2.3, // Width, Height (slightly taller than wide)
+                this.visualRadius * 2.1, this.visualRadius * 2.3, // Width, Height (slightly taller than wide)
                 i * (360.0 / numPanels) - 90 - (360.0/numPanels)*0.1, // Start angle (offset for gaps)
                 (i + 1) * (360.0 / numPanels) - 90 + (360.0/numPanels)*0.1, // End angle (offset for gaps)
                 PIE); // Use PIE mode to fill to center
@@ -856,21 +891,24 @@ class Balloon {
         noFill();
         // Highlight
         stroke(255, 255, 255, 30); // Faint white
-        strokeWeight(this.radius * 0.5); // Thick stroke for diffused look
-        arc(0,0, this.radius*1.8, this.radius*2.0, -150, -30); // Top-left curve
+        strokeWeight(this.visualRadius * 0.5); // Thick stroke for diffused look
+        arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, -150, -30); // Top-left curve
         // Shadow
         stroke(0, 0, 0, 40); // Faint black
-        strokeWeight(this.radius * 0.6);
-        arc(0,0, this.radius*1.8, this.radius*2.0, 30, 150); // Bottom-right curve
+        strokeWeight(this.visualRadius * 0.6);
+        arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, 30, 150); // Bottom-right curve
 
         pop();
         noStroke();
     }
 
     hit() {
-        if (!this.isAlive) return; // Can't hit it if already dead
+        // Called when hit by a bullet
+        if (!this.isAlive) return; // Can't hit it if already dead/respawning
+        console.log("Balloon HIT by bullet!");
         this.isAlive = false;
         this.respawnTimer = BALLOON_RESPAWN_FRAMES; // Set timer to respawn later
+        // Explosion is created in the main draw loop where the hit is detected
     }
 
     respawn() {
@@ -885,10 +923,12 @@ class Balloon {
     }
 
     checkCollision(bullet) {
+        // Checks collision with a bullet
         if (!this.isAlive) return false; // Cannot collide if dead
         // Check distance between bullet center and balloon center (envelope)
         let distance = dist(this.pos.x, this.pos.y, bullet.position.x, bullet.position.y);
-        return distance < this.radius + bullet.size / 2; // Collision if distance is less than sum of radii
+        // Use the collision radius defined in constructor
+        return distance < this.radius + bullet.size / 2;
     }
 }
 
