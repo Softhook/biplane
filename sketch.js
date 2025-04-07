@@ -1,3 +1,5 @@
+// --- START OF FILE sketch.js ---
+
 // --- Game Configuration ---
 const GRAVITY_FORCE = 0.07;
 const THRUST_FORCE = 0.16;
@@ -14,8 +16,8 @@ const MIN_TAKEOFF_SPEED = 0.5;
 const MAX_LANDING_SPEED = 2.5;
 const MAX_PARTICLES = 150;
 const PLANE_COLLISION_THRESHOLD_FACTOR = 0.8;
-const STALL_ANGLE_THRESHOLD = -70;
-const STALL_RECOVERY_ANGLE = -60;
+const STALL_ANGLE_THRESHOLD = -70; // Degrees relative to horizontal when upright
+const STALL_RECOVERY_ANGLE = -60;// Degrees relative to horizontal when upright
 const STALL_EFFECT_FACTOR = 0.2;
 const MAX_SPEED_FOR_SOUND = 8;
 // --- Adjusted Sound Parameters ---
@@ -23,6 +25,8 @@ const BASE_ENGINE_FREQ = 40;
 const MAX_ENGINE_FREQ = 120;
 const BASE_ENGINE_AMP = 0.04;
 const MAX_ENGINE_AMP = 0.18;
+const PROPELLER_BLUR_COLOR = [100, 100, 100, 150];
+const PROPELLER_STOPPED_COLOR = [80, 80, 80];
 
 
 // --- Player Controls ---
@@ -208,100 +212,740 @@ function drawUI() { textSize(40); textFont('monospace'); fill(SCORE_COLOR); stro
 // --- Plane Class ---
 // =====================
 class Plane {
-    constructor(x, y, bodyCol, wingCol, accentCol, controls, id) { this.id = id; this.startPos = createVector(x, y); this.bodyColor = color(bodyCol); this.wingColor = color(wingCol); this.accentColor = color(accentCol); this.controls = controls; this.size = 22; this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = 0; this.isAlive = true; this.isOnGround = true; this.respawnTimer = 0; this.shootCooldown = 0; this.isThrusting = false; this.isTurningLeft = false; this.isTurningRight = false; this.planePoints = this.createPlaneShape(); this.propellerAngle = 0; this.engineSound = null; this.isStalled = false; }
+    constructor(x, y, bodyCol, wingCol, accentCol, controls, id) {
+        this.id = id;
+        this.startPos = createVector(x, y);
+        this.bodyColor = color(bodyCol);
+        this.wingColor = color(wingCol);
+        this.accentColor = color(accentCol);
+        this.controls = controls;
+        this.size = 22;
+        this.position = this.startPos.copy();
+        this.velocity = createVector(0, 0);
+        this.angle = (id === 2) ? 180 : 0; // Start P2 facing left
+        this.isAlive = true;
+        this.isOnGround = true;
+        this.respawnTimer = 0;
+        this.shootCooldown = 0;
+        this.isThrusting = false;
+        this.isTurningLeft = false; // Based on key press
+        this.isTurningRight = false;// Based on key press
+        this.planePoints = this.createPlaneShape();
+        //this.propellerAngle = 0; // Replaced by blur effect
+        this.engineSound = null;
+        this.isStalled = false;
+    }
+
     assignEngineSound(soundObject) { this.engineSound = soundObject; }
-    createPlaneShape() { let s = this.size; return { fuselage: [ {x: s * 0.8, y: 0}, {x: s * 0.6, y: -s * 0.1}, {x: -s * 0.7, y: -s * 0.15}, {x: -s * 0.95, y: -s * 0.05}, {x: -s * 0.9, y: 0}, {x: -s * 0.95, y: s * 0.05}, {x: -s * 0.7, y: s * 0.15}, {x: s * 0.6, y: s * 0.1} ], topWing: [ {x: s * 0.35, y: -s * 0.25}, {x: s * 0.25, y: -s * 0.7}, {x: -s * 0.45, y: -s * 0.7}, {x: -s * 0.4, y: -s * 0.25} ], bottomWing: [ {x: s * 0.25, y: s * 0.25}, {x: s * 0.15, y: s * 0.6}, {x: -s * 0.35, y: s * 0.6}, {x: -s * 0.3, y: s * 0.25} ], tailplane: [ {x: -s * 0.75, y: -s * 0.1}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 1.0, y: 0}, {x: -s * 1.05, y: s * 0.35}, {x: -s * 0.75, y: s * 0.1} ], rudder: [ {x: -s * 0.9, y: 0}, {x: -s * 1.15, y: -s * 0.4}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 0.75, y: -s * 0.1} ], cockpit: [ {x: s * 0.4, y: -s * 0.1}, {x: s * 0.1, y: -s*0.35}, {x: -s*0.1, y: -s*0.25} ], wheels: [ {x: s*0.15, y: s*0.7}, {x: -s*0.2, y: s*0.7} ], wheelRadius: s * 0.18 }; }
-    handleInput(keys) { if (!this.isAlive || this.respawnTimer > 0) { this.isThrusting = false; this.isTurningLeft = false; this.isTurningRight = false; return; } this.isThrusting = keys[this.controls.thrust] || false; this.isTurningLeft = keys[this.controls.left] || false; this.isTurningRight = keys[this.controls.right] || false; if (keys[this.controls.shoot]) { this.shoot(); } }
+
+    createPlaneShape() {
+        let s = this.size;
+        // Defined as if facing right (angle = 0)
+        return {
+            fuselage: [ {x: s * 0.8, y: 0}, {x: s * 0.6, y: -s * 0.1}, {x: -s * 0.7, y: -s * 0.15}, {x: -s * 0.95, y: -s * 0.05}, {x: -s * 0.9, y: 0}, {x: -s * 0.95, y: s * 0.05}, {x: -s * 0.7, y: s * 0.15}, {x: s * 0.6, y: s * 0.1} ],
+            topWing: [ {x: s * 0.35, y: -s * 0.25}, {x: s * 0.25, y: -s * 0.7}, {x: -s * 0.45, y: -s * 0.7}, {x: -s * 0.4, y: -s * 0.25} ],
+            bottomWing: [ {x: s * 0.25, y: s * 0.25}, {x: s * 0.15, y: s * 0.6}, {x: -s * 0.35, y: s * 0.6}, {x: -s * 0.3, y: s * 0.25} ],
+            tailplane: [ {x: -s * 0.75, y: -s * 0.1}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 1.0, y: 0}, {x: -s * 1.05, y: s * 0.35}, {x: -s * 0.75, y: s * 0.1} ],
+            rudder: [ {x: -s * 0.9, y: 0}, {x: -s * 1.15, y: -s * 0.4}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 0.75, y: -s * 0.1} ],
+            cockpit: [ {x: s * 0.4, y: -s * 0.1}, {x: s * 0.1, y: -s*0.35}, {x: -s*0.1, y: -s*0.25} ],
+            wheels: [ {x: s*0.15, y: s*0.7}, {x: -s*0.2, y: s*0.7} ],
+            wheelRadius: s * 0.18
+        };
+    }
+
+    handleInput(keys) {
+        if (!this.isAlive || this.respawnTimer > 0) {
+            this.isThrusting = false;
+            this.isTurningLeft = false;
+            this.isTurningRight = false;
+            return;
+        }
+        this.isThrusting = keys[this.controls.thrust] || false;
+        // Note: 'left' and 'right' keys correspond directly to angle change direction
+        // P1: A decreases angle (turn left), D increases angle (turn right)
+        // P2: Left Arrow decreases angle (turn up when facing left), Right Arrow increases angle (turn down when facing left)
+        this.isTurningLeft = keys[this.controls.left] || false;
+        this.isTurningRight = keys[this.controls.right] || false;
+
+        if (keys[this.controls.shoot]) { this.shoot(); }
+    }
+
     applyForce(force) { this.velocity.add(force); }
 
-    // --- Revised update() with robust ground/air state handling ---
     update() {
         // Respawn Logic
         if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; }
         if (!this.isAlive) { if (this.engineSound && audioStarted) this.engineSound.amp(0, 0.05); return; }
         if (this.shootCooldown > 0) { this.shootCooldown--; }
 
-        // Determine Forces (based on previous frame's state)
-        let effectiveGravity = GRAVITY_FORCE; let thrustVector = createVector(0, 0); let currentThrustForce = THRUST_FORCE;
-        if (this.isStalled) { currentThrustForce *= STALL_EFFECT_FACTOR; }
-        if (this.isTurningLeft) { this.angle -= TURN_SPEED; } if (this.isTurningRight) { this.angle += TURN_SPEED; }
-        if (this.isThrusting) { thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce); }
+        // --- Apply Turning ---
+        // Standard angle convention: counter-clockwise is negative change
+        if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
+        if (this.isTurningRight) { this.angle += TURN_SPEED; }
 
-        // Apply Forces
-        if (this.isOnGround) { this.velocity.x *= GROUND_FRICTION; this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.1)); if (!this.isThrusting || this.angle >= -5 || this.angle <= -175) { this.applyForce(createVector(0, effectiveGravity)); } }
-        else { this.applyForce(thrustVector); this.applyForce(createVector(0, effectiveGravity)); this.velocity.mult(DAMPING_FACTOR); }
+        // --- Determine Forces ---
+        let effectiveGravity = GRAVITY_FORCE;
+        let thrustVector = createVector(0, 0);
+        let currentThrustForce = THRUST_FORCE;
+        if (this.isStalled) { currentThrustForce *= STALL_EFFECT_FACTOR; }
+        if (this.isThrusting) {
+            // Thrust is always applied in the direction the plane is *currently* pointing
+            thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce);
+        }
+
+        // --- Apply Forces based on state ---
+        if (this.isOnGround) {
+            this.velocity.x *= GROUND_FRICTION;
+            // Apply horizontal thrust and a small vertical component if angled up
+            let normalizedAngle = (this.angle % 360 + 360) % 360;
+            let isAngledUpSlightly = false;
+            if (this.id === 1) {
+                 isAngledUpSlightly = (this.angle < -5 && this.angle > -90);
+            } else { // P2
+                 isAngledUpSlightly = (normalizedAngle > 185 && normalizedAngle < 270);
+            }
+
+            if (isAngledUpSlightly) {
+                 this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.1)); // Apply small vertical thrust portion
+            } else {
+                 this.applyForce(createVector(thrustVector.x, 0)); // Only horizontal thrust if flat/inverted/down
+            }
+
+            // Apply gravity unless trying to take off
+            if (!this.isThrusting || !isAngledUpSlightly) {
+                this.applyForce(createVector(0, effectiveGravity));
+            }
+        }
+        else { // Airborne
+            this.applyForce(thrustVector); // Apply full thrust vector
+            this.applyForce(createVector(0, effectiveGravity)); // Apply gravity
+            this.velocity.mult(DAMPING_FACTOR); // Apply air drag
+        }
 
         // Update Position
         this.position.add(this.velocity);
 
-        // Check and Handle Ground Interaction / State Changes (AFTER position update)
-        let groundCheckY = GROUND_Y - this.size * 0.8;
+        // --- Check and Handle Ground Interaction / State Changes ---
+        let groundCheckY = GROUND_Y - this.size * 0.8; // Point where wheels touch
         if (this.position.y >= groundCheckY) {
              // --- Landing/Crash Detection ---
-             if (!this.isOnGround) { // Was airborne last frame?
-                 if (this.velocity.y > MAX_LANDING_SPEED) { console.log(`Plane ${this.id} CRASH LANDED! Speed: ${this.velocity.y.toFixed(2)}`); this.hit(true); return; }
-                 else { this.isOnGround = true; this.isStalled = false; console.log(`Plane ${this.id} landed safely.`); }
+             if (!this.isOnGround) { // Was airborne last frame? Check for landing/crash
+                 let normalizedAngle = (this.angle % 360 + 360) % 360;
+                 // Check if angle is too steep (roughly > 45 deg from horizontal)
+                 let isTooSteep = (normalizedAngle > 45 && normalizedAngle < 135) || (normalizedAngle > 225 && normalizedAngle < 315);
+
+                 if (this.velocity.y > MAX_LANDING_SPEED || isTooSteep) {
+                     console.log(`Plane ${this.id} CRASH LANDED! Speed: ${this.velocity.y.toFixed(2)}, Angle: ${this.angle.toFixed(1)}, TooSteep: ${isTooSteep}`);
+                     this.hit(true); return; // Stop update if crashed
+                 } else {
+                     // Safe landing
+                     this.isOnGround = true;
+                     this.isStalled = false; // Recover from stall on landing
+                     console.log(`Plane ${this.id} landed safely.`);
+                 }
              }
              // --- Ground Clamping & State Update ---
-             this.isOnGround = true; this.position.y = groundCheckY; this.velocity.y = 0;
+             this.isOnGround = true;
+             this.position.y = groundCheckY;
+             this.velocity.y = 0; // Stop vertical movement
+
              // --- Takeoff Check ---
-             if (this.isOnGround) { let speed = this.velocity.mag(); if (this.isThrusting && this.angle < -5 && this.angle > -175 && speed > MIN_TAKEOFF_SPEED) { this.isOnGround = false; this.isStalled = false; this.velocity.y -= THRUST_FORCE * 0.6; console.log(`Plane ${this.id} took off.`); } }
+             let speed = this.velocity.mag();
+             let isAngledForTakeoff = false;
+             let normalizedAngle = (this.angle % 360 + 360) % 360;
+             if (this.id === 1) {
+                 // P1 takeoff angle: Roughly -5 to -85 degrees
+                 isAngledForTakeoff = (this.angle < -5 && this.angle > -85);
+             } else { // P2
+                 // P2 takeoff angle: Roughly 185 to 265 degrees
+                 isAngledForTakeoff = (normalizedAngle > 185 && normalizedAngle < 265);
+             }
+
+             if (this.isThrusting && isAngledForTakeoff && speed > MIN_TAKEOFF_SPEED) {
+                 this.isOnGround = false;
+                 this.isStalled = false;
+                 this.velocity.y -= THRUST_FORCE * 0.6; // Give a little takeoff boost
+                 console.log(`Plane ${this.id} took off.`);
+             }
         } else {
             // --- Airborne State Update ---
             this.isOnGround = false;
+
             // --- Stall Check (Only when airborne) ---
-            if (this.angle < STALL_ANGLE_THRESHOLD) { if (!this.isStalled) console.log(`Plane ${this.id} stalled!`); this.isStalled = true; }
-            else if (this.angle > STALL_RECOVERY_ANGLE) { if (this.isStalled) console.log(`Plane ${this.id} recovered from stall.`); this.isStalled = false; }
+            let normAngle = (this.angle % 360 + 360) % 360;
+            let checkAngle = this.angle; // Use raw angle for comparisons involving negative values
+            let isTryingStall = false;
+            let isTryingRecover = false;
+
+             if (normAngle > 90 && normAngle < 270) { // Mostly inverted
+                // Stall if nose points too far "up" relative to inverted flight (angle > 250)
+                isTryingStall = normAngle > (180 - STALL_ANGLE_THRESHOLD);
+                // Recover if nose points less "up" relative to inverted flight (angle < 240)
+                isTryingRecover = normAngle < (180 - STALL_RECOVERY_ANGLE);
+            } else { // Mostly upright
+                // Stall if nose points too far up (angle < -70)
+                isTryingStall = checkAngle < STALL_ANGLE_THRESHOLD;
+                // Recover if nose points less up (angle > -60)
+                isTryingRecover = checkAngle > STALL_RECOVERY_ANGLE;
+            }
+
+            if(isTryingStall) {
+                if (!this.isStalled) console.log(`Plane ${this.id} stalled! Angle: ${checkAngle.toFixed(1)} Norm: ${normAngle.toFixed(1)}`);
+                this.isStalled = true;
+            } else if (isTryingRecover) {
+                 if (this.isStalled) console.log(`Plane ${this.id} recovered from stall. Angle: ${checkAngle.toFixed(1)} Norm: ${normAngle.toFixed(1)}`);
+                 this.isStalled = false;
+            }
+            // If neither condition met, stall state remains unchanged.
         }
 
-        // Boundary Constraints
+        // --- Boundary Constraints ---
         if (this.position.x > width + this.size) { this.position.x = -this.size; } else if (this.position.x < -this.size) { this.position.x = width + this.size; }
-        if (this.position.y > groundCheckY && this.isOnGround){ this.position.y = groundCheckY; }
+        // Re-check ground clamp after velocity/position updates might cause penetration
+        if (this.position.y > groundCheckY && this.isOnGround){ this.position.y = groundCheckY; this.velocity.y = 0; }
+        // Ceiling boundary
         if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
-
-        // Update Propeller Angle
-        if (this.isThrusting || this.velocity.magSq() > 0.1) { this.propellerAngle += 45; } else if (this.isOnGround) { this.propellerAngle = 0; } else { this.propellerAngle += 5; }
 
         // Check Hut Collision
         this.checkCollisionHut(hut);
 
-        // Update Engine Sound
-        if (this.engineSound && audioStarted) { let speed = this.velocity.mag(); let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true); let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP; if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; } if (abs(this.engineSound.getAmp() - targetAmp) > 0.001) { this.engineSound.amp(targetAmp, 0.1); } this.engineSound.freq(targetFreq, 0.1); }
-        else if (this.engineSound && !audioStarted) { this.engineSound.amp(0); }
+        // --- Update Engine Sound ---
+        if (this.engineSound && audioStarted) {
+             let speed = this.velocity.mag();
+             let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
+             let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
+             if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; }
+             // Prevent sound clicking off/on rapidly near zero amp
+             if (abs(this.engineSound.getAmp() - targetAmp) > 0.001 || targetAmp > 0.01) {
+                 this.engineSound.amp(targetAmp, 0.1);
+             } else if (targetAmp < 0.01 && this.engineSound.getAmp() > 0) { // Only ramp down if currently audible
+                  this.engineSound.amp(0, 0.1); // Ensure it goes fully silent if needed
+             }
+             this.engineSound.freq(targetFreq, 0.1);
+        } else if (this.engineSound && !audioStarted) {
+             this.engineSound.amp(0);
+        }
     } // End of update()
 
-    display() { push(); translate(this.position.x, this.position.y); rotate(this.angle); if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) { } else { stroke(0); strokeWeight(1.5); let pp = this.planePoints; fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.accentColor); beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.wingColor); beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE); noFill(); stroke(0, 150); strokeWeight(1.5); beginShape(); for(let p of pp.cockpit) { curveVertex(p.x, p.y); } endShape(); if (this.isOnGround || (!this.isOnGround && this.position.y > GROUND_Y - this.size * 5) || this.velocity.y > 1.0) { fill(40); noStroke(); ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2); ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2); stroke(60); strokeWeight(3); line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1); line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1); } noStroke(); fill(120, 120, 120, 200); push(); translate(this.size * 0.85, 0); rotate(this.propellerAngle); rect(0, 0, this.size * 0.1, this.size * 0.8); rect(0, 0, this.size * 0.8, this.size * 0.1); pop(); fill(this.accentColor); ellipse(this.size * 0.85, 0, this.size * 0.2, this.size * 0.2); } pop(); noStroke(); }
-    shoot() { let canShoot = !this.isOnGround || (this.isOnGround && this.angle < -10 && this.angle > -170); if (this.shootCooldown <= 0 && this.isAlive && canShoot) { let noseOffset = createVector(this.size * 0.9, 0); let rotatedOffset = noseOffset.copy().rotate(this.angle); let bulletPos = p5.Vector.add(this.position, rotatedOffset); let bulletAngle = this.angle; let newBullet = new Bullet(bulletPos.x, bulletPos.y, bulletAngle, this.id, this.bodyColor); bullets.push(newBullet); this.shootCooldown = SHOOT_COOLDOWN_FRAMES; if (audioStarted) { shootSoundEnv.play(shootNoise); } } }
-    checkCollisionHut(hutRect) { if (!this.isAlive || this.respawnTimer > 0) return false; let planeWidth = this.size * 2.6; let planeHeight = this.size * 1.5; if (this.position.x + planeWidth/2 > hutRect.x - hutRect.w / 2 && this.position.x - planeWidth/2 < hutRect.x + hutRect.w / 2 && this.position.y + planeHeight/2 > hutRect.y - hutRect.h / 2 && this.position.y - planeHeight/2 < hutRect.y + hutRect.h / 2) { let buffer = this.size * 0.4; if (this.position.x > hutRect.x - hutRect.w / 2 - buffer && this.position.x < hutRect.x + hutRect.w / 2 + buffer && this.position.y > hutRect.y - hutRect.h / 2 - buffer && this.position.y < hutRect.y + hutRect.h / 2 + this.size * 0.5 ) { console.log(`Plane ${this.id} hit hut!`); this.hit(true); return true; } } return false; }
-    hit(causedByCrash) { if (!this.isAlive) return; console.log(`Plane ${this.id} HIT! ${causedByCrash ? "(Crash/Hut/PlaneCollision)" : "(Bullet)"}`); this.isAlive = false; this.isOnGround = false; this.isStalled = false; this.velocity = createVector(random(-1.5, 1.5), -2.5); this.respawnTimer = RESPAWN_DELAY_FRAMES; createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS); if (this.engineSound && audioStarted) this.engineSound.amp(0, 0.05); if (causedByCrash) { if (this.id === 1) { score2++; console.log("Point for Player 2!"); } else { score1++; console.log("Point for Player 1!"); } } }
-    respawn() { let startX = (this.id === 1) ? width * 0.2 : width * 0.8; this.startPos = createVector(startX, GROUND_Y - 10); this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = 0; this.isAlive = true; this.isOnGround = true; this.isStalled = false; this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2; console.log(`Plane ${this.id} Respawned.`); if (this.engineSound && audioStarted) { this.engineSound.freq(BASE_ENGINE_FREQ, 0.1); this.engineSound.amp(BASE_ENGINE_AMP, 0.1); } }
+    display() {
+        push();
+        translate(this.position.x, this.position.y);
+        rotate(this.angle); // Handles the facing direction (0 for P1 right, 180 for P2 left)
+
+        // ADD THIS BLOCK: Flip vertically *after* rotation for Plane 2
+        if (this.id === 2) {
+            scale(1, -1); // Flip along the plane's local X-axis (now pointing left)
+        }
+
+        // --- The rest of the drawing code remains the same ---
+        if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) {
+            // Flicker when respawning
+        } else {
+            // Draw Plane Body
+            stroke(0);
+            strokeWeight(1.5);
+            let pp = this.planePoints;
+
+            // Draw parts back-to-front
+            fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); // Bottom Wing Shadow
+            beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE);
+
+            fill(this.accentColor); // Tailplane
+            beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE);
+
+            fill(this.bodyColor); // Fuselage
+            beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE);
+
+            fill(this.wingColor); // Top Wing
+            beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE);
+
+            fill(this.bodyColor); // Rudder
+            beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE);
+
+            // Cockpit outline
+             noFill(); stroke(0, 150); strokeWeight(1.5);
+             if (pp.cockpit.length >= 2) { // Ensure enough points for curveVertex
+                beginShape();
+                curveVertex(pp.cockpit[0].x, pp.cockpit[0].y); // Duplicate first point
+                for(let p of pp.cockpit) { curveVertex(p.x, p.y); }
+                curveVertex(pp.cockpit[pp.cockpit.length - 1].x, pp.cockpit[pp.cockpit.length - 1].y); // Duplicate last point
+                endShape();
+             }
+
+            // Draw Wheels
+            if (this.isOnGround || (!this.isOnGround && this.position.y > GROUND_Y - this.size * 5) || (!this.isOnGround && this.velocity.y > 0.5)) {
+                 fill(40); noStroke();
+                 ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2);
+                 ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2);
+                 stroke(60); strokeWeight(3);
+                 line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1);
+                 line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1);
+            }
+
+            // Draw Propeller
+            noStroke();
+            let noseX = this.size * 0.85;
+            let propHeight = this.size * 0.9;
+            let propWidthRunning = this.size * 0.15;
+            let propWidthStopped = this.size * 0.05;
+            let engineRunning = this.isThrusting || (!this.isOnGround && this.velocity.magSq() > 0.5);
+
+            if (engineRunning) {
+                fill(PROPELLER_BLUR_COLOR);
+                ellipse(noseX, 0, propWidthRunning, propHeight);
+            } else if (!this.isOnGround) {
+                fill(PROPELLER_STOPPED_COLOR);
+                rect(noseX, 0, propWidthStopped, propHeight);
+            }
+            fill(this.accentColor); // Spinner
+            ellipse(noseX, 0, this.size * 0.2, this.size * 0.2);
+        }
+        pop(); // Restore drawing state (undoes translate, rotate, and scale)
+        noStroke();
+    }
+
+    shoot() {
+        // Check if plane can shoot based on state and angle
+        let isAngledForShootingOnGround = false;
+        let normalizedAngle = (this.angle % 360 + 360) % 360;
+        if (this.id === 1) {
+             // P1 can shoot if angle is roughly between horizontal and up (-10 to -170)
+             isAngledForShootingOnGround = (this.angle < -10 && this.angle > -170);
+        } else { // P2
+             // P2 can shoot if angle is roughly between horizontal and up (190 to 350)
+             isAngledForShootingOnGround = (normalizedAngle > 190 && normalizedAngle < 350);
+        }
+        let canShoot = !this.isOnGround || (this.isOnGround && isAngledForShootingOnGround);
+
+        if (this.shootCooldown <= 0 && this.isAlive && canShoot) {
+            // Calculate bullet origin at the nose of the plane
+            let noseOffsetDistance = this.size * 0.9;
+            let noseOffsetVector = createVector(noseOffsetDistance, 0); // Offset along plane's local X axis
+
+            // Rotate the offset by the plane's current angle
+            let rotatedOffset = noseOffsetVector.copy().rotate(this.angle);
+
+            // Add the rotated offset to the plane's world position
+            let bulletPos = p5.Vector.add(this.position, rotatedOffset);
+
+            // Bullet travels in the direction the plane is currently facing
+            let bulletAngle = this.angle;
+
+            // Create and add the bullet
+            let newBullet = new Bullet(bulletPos.x, bulletPos.y, bulletAngle, this.id, this.bodyColor);
+            bullets.push(newBullet);
+
+            // Reset cooldown and play sound
+            this.shootCooldown = SHOOT_COOLDOWN_FRAMES;
+            if (audioStarted) { shootSoundEnv.play(shootNoise); }
+        }
+    }
+
+    checkCollisionHut(hutRect) {
+         if (!this.isAlive || this.respawnTimer > 0) return false;
+
+         // --- Accurate Collision Check using Rotated Bounding Box ---
+         // 1. Define plane's corners in local space (relative to center 0,0)
+         let s = this.size;
+         let halfW = s * 1.2; // Approximate half-width
+         let halfH = s * 0.75; // Approximate half-height
+         let cornersLocal = [
+            createVector(-halfW, -halfH), createVector( halfW, -halfH),
+            createVector( halfW,  halfH), createVector(-halfW,  halfH)
+         ];
+
+         // 2. Transform corners to world space, accounting for P2 flip
+         let scaleX = (this.id === 2) ? -1 : 1; // P2 is flipped in display, but physics use normal coords
+         // CORRECTION: The physics use the standard angle. The flip is ONLY for display. Collision check needs the non-flipped geometry rotated by the actual angle.
+         let cornersWorld = cornersLocal.map(p => {
+             let rotatedP = p.copy().rotate(this.angle); // Rotate local point by plane angle
+             return p5.Vector.add(this.position, rotatedP); // Add world position
+         });
+
+         // 3. Check collision: AABB of the plane's rotated box vs AABB of the hut
+         let minX = min(cornersWorld.map(p => p.x));
+         let maxX = max(cornersWorld.map(p => p.x));
+         let minY = min(cornersWorld.map(p => p.y));
+         let maxY = max(cornersWorld.map(p => p.y));
+
+         let hutMinX = hutRect.x - hutRect.w / 2;
+         let hutMaxX = hutRect.x + hutRect.w / 2;
+         let hutMinY = hutRect.y - hutRect.h / 2;
+         let hutMaxY = hutRect.y + hutRect.h / 2;
+
+         if (maxX > hutMinX && minX < hutMaxX && maxY > hutMinY && minY < hutMaxY) {
+            // AABB overlap detected. More precise check (like SAT) could go here if needed.
+            console.log(`Plane ${this.id} hit hut!`);
+            this.hit(true);
+            return true;
+         }
+         return false;
+     }
+
+    hit(causedByCrash) {
+        if (!this.isAlive) return;
+        console.log(`Plane ${this.id} HIT! ${causedByCrash ? "(Crash/Hut/PlaneCollision)" : "(Bullet)"}`);
+        this.isAlive = false;
+        this.isOnGround = false; // No longer constrained by ground
+        this.isStalled = false;
+        this.velocity = createVector(random(-1.5, 1.5), -2.5); // Explosion impulse
+        this.respawnTimer = RESPAWN_DELAY_FRAMES;
+        createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
+        if (this.engineSound && audioStarted) this.engineSound.amp(0, 0.05);
+        if (causedByCrash) {
+            // Score awarded to the *other* player on a crash
+            if (this.id === 1) { score2++; console.log("Crash! Point for Player 2!"); }
+            else { score1++; console.log("Crash! Point for Player 1!"); }
+        }
+    }
+
+    respawn() {
+        let startX = (this.id === 1) ? width * 0.2 : width * 0.8;
+        let startY = GROUND_Y - this.size * 0.8; // Respawn slightly above ground line
+        this.startPos = createVector(startX, startY);
+        this.position = this.startPos.copy();
+        this.velocity = createVector(0, 0);
+        this.angle = (this.id === 2) ? 180 : 0; // Reset angle based on ID (P2 faces left)
+        this.isAlive = true;
+        this.isOnGround = true; // Start on the ground
+        this.isStalled = false;
+        this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2; // Give half cooldown on respawn
+        console.log(`Plane ${this.id} Respawned.`);
+        if (this.engineSound && audioStarted) {
+            this.engineSound.freq(BASE_ENGINE_FREQ, 0.1);
+            this.engineSound.amp(BASE_ENGINE_AMP, 0.1); // Start with base engine sound
+        }
+    }
 }
 
 // ======================
 // --- Bullet Class ---
 // ======================
-class Bullet { constructor(x, y, angle, ownerId, planeColor) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED); this.ownerId = ownerId; this.size = 8; this.life = 150; this.planeColor = planeColor; this.coreColor = color(BULLET_CORE_BRIGHTNESS); this.trailColor = color(red(planeColor), green(planeColor), blue(planeColor), BULLET_TRAIL_ALPHA); } update() { this.position.add(this.velocity); this.life--; } display() { push(); translate(this.position.x, this.position.y); rotate(degrees(this.velocity.heading())); strokeWeight(2.5); stroke(this.trailColor); line(-this.size * 0.6, 0, this.size * 0.4, 0); strokeWeight(1.5); stroke(this.coreColor); line(-this.size * 0.4, 0, this.size * 0.2, 0); pop(); noStroke(); } isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size); } checkCollision(plane) { if (plane.id === this.ownerId || !plane.isAlive || plane.respawnTimer > 0) { return false; } let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < (plane.size * 0.8); } checkCollisionHut(hutRect) { return (this.position.x > hutRect.x - hutRect.w / 2 && this.position.x < hutRect.x + hutRect.w / 2 && this.position.y > hutRect.y - hutRect.h / 2 && this.position.y < hutRect.y + hutRect.h / 2); } }
+class Bullet {
+    constructor(x, y, angle, ownerId, planeColor) {
+        this.position = createVector(x, y);
+        this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED); // Travels in direction of plane angle
+        this.ownerId = ownerId;
+        this.size = 8;
+        this.life = 150; // Frames before disappearing
+        this.planeColor = planeColor; // Base color for trail
+        this.coreColor = color(BULLET_CORE_BRIGHTNESS);
+        this.trailColor = color(red(planeColor), green(planeColor), blue(planeColor), BULLET_TRAIL_ALPHA);
+    }
+
+    update() {
+        this.position.add(this.velocity);
+        this.life--;
+    }
+
+    display() {
+        push();
+        translate(this.position.x, this.position.y);
+        rotate(degrees(this.velocity.heading())); // Align with velocity vector
+
+        // Draw trail behind the core
+        strokeWeight(2.5);
+        stroke(this.trailColor);
+        line(-this.size * 0.6, 0, this.size * 0.4, 0);
+
+        // Draw bright core
+        strokeWeight(1.5);
+        stroke(this.coreColor);
+        line(-this.size * 0.4, 0, this.size * 0.2, 0); // Slightly offset forward
+
+        pop();
+        noStroke();
+    }
+
+    isOffscreen() {
+        return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size);
+    }
+
+    checkCollision(plane) {
+        if (plane.id === this.ownerId || !plane.isAlive || plane.respawnTimer > 0) {
+            return false; // Cannot collide with self, dead planes, or respawning planes
+        }
+        // Check distance vs combined radii (approximate)
+        let collisionRadius = plane.size * 0.8; // Effective collision radius for plane body
+        let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y);
+        return distance < (collisionRadius + this.size / 2);
+    }
+
+    checkCollisionHut(hutRect) {
+        // Simple Axis-Aligned Bounding Box check for bullet vs hut
+        return (this.position.x > hutRect.x - hutRect.w / 2 &&
+                this.position.x < hutRect.x + hutRect.w / 2 &&
+                this.position.y > hutRect.y - hutRect.h / 2 &&
+                this.position.y < hutRect.y + hutRect.h / 2);
+    }
+}
+
 
 // =====================
 // --- Cloud Class ---
 // =====================
- class Cloud { constructor() { this.pos = createVector(0,0); this.vel = createVector(0,0); this.size = 100; this.puffOffsets = []; this.numPuffs = 7; this.opacity = 200; this.speedFactor = 1; this.direction = 1; this.reset(); this.pos.x = random(width); } reset() { this.direction = random() < 0.5 ? -1 : 1; this.size = random(100, 190); let startX = this.direction > 0 ? -this.size * 1.5 : width + this.size * 1.5; this.pos = createVector(startX, random(height * 0.1, height * 0.6)); this.speedFactor = random(0.5, 1.5); this.vel = createVector(CLOUD_BASE_SPEED * this.direction * this.speedFactor, 0); this.numPuffs = floor(random(6, 12)); this.puffOffsets = []; for (let i = 0; i < this.numPuffs; i++) { let puffX = random(-this.size * 0.7, this.size * 0.7); let puffY = random(-this.size * 0.3, this.size * 0.3); let puffR = random(this.size * 0.4, this.size * 0.9) * random(0.8, 1.2); this.puffOffsets.push({ x: puffX, y: puffY, r: puffR }); } this.opacity = random(190, 240); } update() { this.pos.add(this.vel); if (this.direction > 0 && this.pos.x - this.size * 1.5 > width) { this.reset(); } else if (this.direction < 0 && this.pos.x + this.size * 1.5 < 0) { this.reset(); } } display() { push(); noStroke(); translate(this.pos.x, this.pos.y); fill(CLOUD_SHADOW[0], CLOUD_SHADOW[1], CLOUD_SHADOW[2], this.opacity * 0.6); ellipse(0, this.size * 0.25, this.size * 1.3, this.size * 0.7); fill(CLOUD_COLOR[0], CLOUD_COLOR[1], CLOUD_COLOR[2], this.opacity); for (let puff of this.puffOffsets) { ellipse(puff.x, puff.y, puff.r, puff.r * 0.85); } pop(); } }
+ class Cloud {
+     constructor() {
+         this.pos = createVector(0,0);
+         this.vel = createVector(0,0);
+         this.size = 100;
+         this.puffOffsets = [];
+         this.numPuffs = 7;
+         this.opacity = 200;
+         this.speedFactor = 1;
+         this.direction = 1;
+         this.reset();
+         // Start clouds at random positions initially
+         this.pos.x = random(width);
+     }
+
+     reset() {
+         this.direction = random() < 0.5 ? -1 : 1; // Random direction
+         this.size = random(100, 190);
+         // Start offscreen based on direction
+         let startX = this.direction > 0 ? -this.size * 1.5 : width + this.size * 1.5;
+         this.pos = createVector(startX, random(height * 0.1, height * 0.6)); // Random height
+         this.speedFactor = random(0.5, 1.5); // Vary speed slightly
+         this.vel = createVector(CLOUD_BASE_SPEED * this.direction * this.speedFactor, 0);
+         this.numPuffs = floor(random(6, 12)); // Vary complexity
+         this.puffOffsets = [];
+         for (let i = 0; i < this.numPuffs; i++) {
+             let puffX = random(-this.size * 0.7, this.size * 0.7);
+             let puffY = random(-this.size * 0.3, this.size * 0.3);
+             let puffR = random(this.size * 0.4, this.size * 0.9) * random(0.8, 1.2); // Random puff size
+             this.puffOffsets.push({ x: puffX, y: puffY, r: puffR });
+         }
+         this.opacity = random(190, 240); // Vary opacity
+     }
+
+     update() {
+         this.pos.add(this.vel);
+         // Reset if moved fully offscreen
+         if (this.direction > 0 && this.pos.x - this.size * 1.5 > width) {
+             this.reset();
+         } else if (this.direction < 0 && this.pos.x + this.size * 1.5 < 0) {
+             this.reset();
+         }
+     }
+
+     display() {
+         push();
+         noStroke();
+         translate(this.pos.x, this.pos.y);
+
+         // Draw shadow ellipse slightly below
+         fill(CLOUD_SHADOW[0], CLOUD_SHADOW[1], CLOUD_SHADOW[2], this.opacity * 0.6);
+         ellipse(0, this.size * 0.25, this.size * 1.3, this.size * 0.7);
+
+         // Draw main cloud puffs
+         fill(CLOUD_COLOR[0], CLOUD_COLOR[1], CLOUD_COLOR[2], this.opacity);
+         for (let puff of this.puffOffsets) {
+             ellipse(puff.x, puff.y, puff.r, puff.r * 0.85); // Slightly oval puffs
+         }
+         pop();
+     }
+ }
 
 // ==========================
 // --- Hot Air Balloon Class ---
 // ==========================
-class Balloon { constructor(x, y) { this.basePos = createVector(x, y); this.pos = this.basePos.copy(); this.bobbleOffset = 0; this.bobbleSpeed = 0.6; this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.radius = 30; this.basketSize = { w: 25, h: 18 }; this.ropeLength = 25; this.isAlive = true; this.respawnTimer = 0; } update() { if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; } if (!this.isAlive) return; this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; this.basePos.x += this.driftSpeed; if (this.driftSpeed > 0 && this.basePos.x > width + this.radius * 2) { this.basePos.x = -this.radius * 2; } else if (this.driftSpeed < 0 && this.basePos.x < -this.radius * 2) { this.basePos.x = width + this.radius * 2; } this.pos.y = this.basePos.y + this.bobbleOffset; this.pos.x = this.basePos.x; } display() { if (!this.isAlive) return; push(); translate(this.pos.x, this.pos.y); noStroke(); let basketTopY = this.radius * 0.8 + this.ropeLength; let basketBottomY = basketTopY + this.basketSize.h; let basketCenterX = 0; stroke(BALLOON_ROPE); strokeWeight(1.5); line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.radius * 0.5, this.radius * 0.7); line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.radius * 0.5, this.radius * 0.7); line(basketCenterX, basketTopY - 3, 0, this.radius * 0.8); fill(BALLOON_BASKET); rect(basketCenterX, basketTopY + this.basketSize.h / 2, this.basketSize.w, this.basketSize.h, 3); fill(BALLOON_BASKET[0]*0.8, BALLOON_BASKET[1]*0.8, BALLOON_BASKET[2]*0.8); rect(basketCenterX, basketTopY + 2, this.basketSize.w, 4, 2); stroke(BALLOON_BASKET[0]*0.7, BALLOON_BASKET[1]*0.7, BALLOON_BASKET[2]*0.7, 180); strokeWeight(1); for(let i = 1; i < 4; i++){ line(basketCenterX - this.basketSize.w/2, basketTopY + i * (this.basketSize.h/4), basketCenterX + this.basketSize.w/2, basketTopY + i*(this.basketSize.h/4)); } for(let i = 1; i < 5; i++){ line(basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketTopY, basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketBottomY); } noStroke(); let numPanels = BALLOON_COLORS.length * 2; for (let i = 0; i < numPanels; i++) { fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); arc(0, 0, this.radius * 2.1, this.radius * 2.3, i * (360.0 / numPanels) - 90 - (360.0/numPanels)*0.1, (i + 1) * (360.0 / numPanels) - 90 + (360.0/numPanels)*0.1, PIE); } noFill(); stroke(255, 255, 255, 30); strokeWeight(this.radius * 0.5); arc(0,0, this.radius*1.8, this.radius*2.0, -150, -30); stroke(0, 0, 0, 40); strokeWeight(this.radius * 0.6); arc(0,0, this.radius*1.8, this.radius*2.0, 30, 150); pop(); noStroke(); } hit() { if (!this.isAlive) return; this.isAlive = false; this.respawnTimer = BALLOON_RESPAWN_FRAMES; } respawn() { this.isAlive = true; this.basePos.x = random(width * 0.1, width * 0.9); this.basePos.y = random(height * 0.15, height * 0.55); this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.pos = this.basePos.copy(); console.log("Balloon Respawned at", this.basePos.x.toFixed(0), this.basePos.y.toFixed(0)); } checkCollision(bullet) { if (!this.isAlive) return false; let distance = dist(this.pos.x, this.pos.y, bullet.position.x, bullet.position.y); return distance < this.radius + bullet.size / 2; } }
+class Balloon {
+    constructor(x, y) {
+        this.basePos = createVector(x, y); // Center point for drift/bobble calculation
+        this.pos = this.basePos.copy(); // Actual drawing position
+        this.bobbleOffset = 0;
+        this.bobbleSpeed = 0.6; // How fast it bobs
+        this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); // Sideways drift
+        this.radius = 30; // Radius of the balloon envelope
+        this.basketSize = { w: 25, h: 18 };
+        this.ropeLength = 25;
+        this.isAlive = true;
+        this.respawnTimer = 0;
+    }
+
+    update() {
+        if (this.respawnTimer > 0) {
+            this.respawnTimer--;
+            if (this.respawnTimer <= 0) {
+                this.respawn();
+            }
+            return; // Do nothing else if waiting to respawn
+        }
+        if (!this.isAlive) return; // Do nothing if dead
+
+        // Bobble up and down
+        this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; // Oscillate vertically
+
+        // Drift sideways
+        this.basePos.x += this.driftSpeed;
+
+        // Wrap around screen edges
+        if (this.driftSpeed > 0 && this.basePos.x > width + this.radius * 2) {
+            this.basePos.x = -this.radius * 2;
+        } else if (this.driftSpeed < 0 && this.basePos.x < -this.radius * 2) {
+            this.basePos.x = width + this.radius * 2;
+        }
+
+        // Update actual position based on drift and bobble
+        this.pos.y = this.basePos.y + this.bobbleOffset;
+        this.pos.x = this.basePos.x;
+    }
+
+    display() {
+        if (!this.isAlive || this.respawnTimer > 0) return; // Don't draw if dead or respawning invisibly
+
+        push();
+        translate(this.pos.x, this.pos.y);
+        noStroke();
+
+        // --- Basket Details ---
+        let basketTopY = this.radius * 0.8 + this.ropeLength;
+        let basketBottomY = basketTopY + this.basketSize.h;
+        let basketCenterX = 0;
+
+        // Ropes
+        stroke(BALLOON_ROPE);
+        strokeWeight(1.5);
+        line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.radius * 0.5, this.radius * 0.7); // Left rope
+        line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.radius * 0.5, this.radius * 0.7); // Right rope
+        line(basketCenterX, basketTopY - 3, 0, this.radius * 0.8); // Center rope (visual)
+
+        // Basket Base
+        fill(BALLOON_BASKET);
+        rect(basketCenterX, basketTopY + this.basketSize.h / 2, this.basketSize.w, this.basketSize.h, 3); // Rounded corners
+
+        // Basket Rim
+        fill(BALLOON_BASKET[0]*0.8, BALLOON_BASKET[1]*0.8, BALLOON_BASKET[2]*0.8); // Slightly darker
+        rect(basketCenterX, basketTopY + 2, this.basketSize.w, 4, 2); // Top rim
+
+        // Basket Weave Texture (Subtle Lines)
+        stroke(BALLOON_BASKET[0]*0.7, BALLOON_BASKET[1]*0.7, BALLOON_BASKET[2]*0.7, 180);
+        strokeWeight(1);
+        // Horizontal lines
+        for(let i = 1; i < 4; i++){
+            line(basketCenterX - this.basketSize.w/2, basketTopY + i * (this.basketSize.h/4), basketCenterX + this.basketSize.w/2, basketTopY + i*(this.basketSize.h/4));
+        }
+        // Vertical lines
+        for(let i = 1; i < 5; i++){
+            line(basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketTopY, basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketBottomY);
+        }
+
+        // --- Balloon Envelope ---
+        noStroke();
+        let numPanels = BALLOON_COLORS.length * 2; // Double the colors for alternating panels
+        for (let i = 0; i < numPanels; i++) {
+            fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); // Cycle through colors
+            // Draw each panel as a pie slice (arc)
+            arc(0, 0, // Center
+                this.radius * 2.1, this.radius * 2.3, // Width, Height (slightly taller than wide)
+                i * (360.0 / numPanels) - 90 - (360.0/numPanels)*0.1, // Start angle (offset for gaps)
+                (i + 1) * (360.0 / numPanels) - 90 + (360.0/numPanels)*0.1, // End angle (offset for gaps)
+                PIE); // Use PIE mode to fill to center
+        }
+
+        // --- Subtle Highlights/Shadows on Envelope ---
+        noFill();
+        // Highlight
+        stroke(255, 255, 255, 30); // Faint white
+        strokeWeight(this.radius * 0.5); // Thick stroke for diffused look
+        arc(0,0, this.radius*1.8, this.radius*2.0, -150, -30); // Top-left curve
+        // Shadow
+        stroke(0, 0, 0, 40); // Faint black
+        strokeWeight(this.radius * 0.6);
+        arc(0,0, this.radius*1.8, this.radius*2.0, 30, 150); // Bottom-right curve
+
+        pop();
+        noStroke();
+    }
+
+    hit() {
+        if (!this.isAlive) return; // Can't hit it if already dead
+        this.isAlive = false;
+        this.respawnTimer = BALLOON_RESPAWN_FRAMES; // Set timer to respawn later
+    }
+
+    respawn() {
+        this.isAlive = true;
+        // Respawn at a random position, avoiding edges initially
+        this.basePos.x = random(width * 0.1, width * 0.9);
+        this.basePos.y = random(height * 0.15, height * 0.55); // Keep in upper part of sky
+        this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); // New random drift
+        this.pos = this.basePos.copy(); // Reset actual position
+        this.bobbleOffset = 0; // Reset bobble
+        console.log("Balloon Respawned at", this.basePos.x.toFixed(0), this.basePos.y.toFixed(0));
+    }
+
+    checkCollision(bullet) {
+        if (!this.isAlive) return false; // Cannot collide if dead
+        // Check distance between bullet center and balloon center (envelope)
+        let distance = dist(this.pos.x, this.pos.y, bullet.position.x, bullet.position.y);
+        return distance < this.radius + bullet.size / 2; // Collision if distance is less than sum of radii
+    }
+}
+
 
 // =======================
 // --- Particle Class ---
 // =======================
- class Particle { constructor(x, y, baseColor) { this.pos = createVector(x, y); let angle = random(360); let speed = random(1, 5); this.vel = p5.Vector.fromAngle(radians(angle), speed); this.vel.y += random(-0.5, 0.5); this.lifespan = random(30, 70); this.baseColor = color(baseColor); this.size = random(4, 12); this.decay = random(0.88, 0.96); } update() { this.pos.add(this.vel); this.vel.mult(0.95); this.vel.y += 0.05; this.lifespan -= 1; this.size *= this.decay; } display() { push(); noStroke(); let currentAlpha = map(this.lifespan, 0, 50, 0, alpha(this.baseColor)); fill(red(this.baseColor), green(this.baseColor), blue(this.baseColor), max(0, currentAlpha)); ellipse(this.pos.x, this.pos.y, this.size, this.size); pop(); } isDead() { return this.lifespan <= 0 || this.size < 1; } }
+ class Particle {
+     constructor(x, y, baseColor) {
+         this.pos = createVector(x, y);
+         let angle = random(360); // Random explosion direction
+         let speed = random(1, 5); // Random initial speed
+         this.vel = p5.Vector.fromAngle(radians(angle), speed);
+         this.vel.y += random(-0.5, 0.5); // Slight vertical variation
+         this.lifespan = random(30, 70); // How long the particle lasts (frames)
+         this.baseColor = color(baseColor); // Store the color it should be
+         this.size = random(4, 12); // Initial size
+         this.decay = random(0.88, 0.96); // How quickly it shrinks
+         this.gravity = 0.05; // Simulate some gravity
+     }
+
+     update() {
+         this.pos.add(this.vel); // Move particle
+         this.vel.mult(0.95); // Apply air friction/damping
+         this.vel.y += this.gravity; // Apply gravity
+         this.lifespan -= 1; // Decrease lifespan
+         this.size *= this.decay; // Shrink particle
+     }
+
+     display() {
+         push();
+         noStroke();
+         // Fade out the particle as it nears the end of its life
+         let currentAlpha = map(this.lifespan, 0, 50, 0, alpha(this.baseColor)); // Fade out over last 50 frames
+         fill(red(this.baseColor), green(this.baseColor), blue(this.baseColor), max(0, currentAlpha)); // Apply color and calculated alpha
+         ellipse(this.pos.x, this.pos.y, this.size, this.size); // Draw as a circle
+         pop();
+     }
+
+     isDead() {
+         // Particle is dead if lifespan is over or it's too small to see
+         return this.lifespan <= 0 || this.size < 1;
+     }
+ }
 
 // ===============================================
 // --- Helper Function to Create Explosions ---
 // ===============================================
  function createExplosion(x, y, count, colors) {
-     if (audioStarted) { explosionSoundEnv.play(explosionNoise); } // Play sound
-     if (particles.length > MAX_PARTICLES) return; // Create particles
-     for (let i = 0; i < count; i++) { let chosenColor = random(colors); if (particles.length < MAX_PARTICLES) { particles.push(new Particle(x, y, chosenColor)); } else { break; } }
+     // Play explosion sound if audio is ready
+     if (audioStarted) {
+         explosionSoundEnv.play(explosionNoise);
+     }
+
+     // Limit total particles to avoid performance issues
+     if (particles.length > MAX_PARTICLES) return;
+
+     // Create the specified number of particles
+     for (let i = 0; i < count; i++) {
+         let chosenColor = random(colors); // Pick a random color from the provided list
+         // Add particle only if we haven't reached the maximum
+         if (particles.length < MAX_PARTICLES) {
+             particles.push(new Particle(x, y, chosenColor));
+         } else {
+             break; // Stop creating if max is reached
+         }
+     }
  }
+// --- END OF FILE sketch.js ---
