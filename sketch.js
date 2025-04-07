@@ -27,7 +27,7 @@ const MAX_ENGINE_FREQ = 120;
 const BASE_ENGINE_AMP = 0.00;
 const MAX_ENGINE_AMP = 0.18;
 const PROPELLER_BLUR_COLOR = [100, 100, 100, 150];
-const PROPELLER_STOPPED_COLOR = [80, 80, 80];
+const PROPELLER_STOPPED_COLOR = [0];
 
 
 // --- Player Controls ---
@@ -611,6 +611,7 @@ class Plane {
 
     } // End of update()
 
+// --- START OF MODIFIED Plane.display() ---
     display() {
         push();
         translate(this.position.x, this.position.y);
@@ -669,25 +670,33 @@ class Plane {
 
             // Draw Propeller
             noStroke();
-            let noseX = this.size * 0.85;
-            let propHeight = this.size * 0.9;
-            let propWidthRunning = this.size * 0.15;
-            let propWidthStopped = this.size * 0.05;
-            let engineRunning = this.isThrusting || (!this.isOnGround && this.velocity.magSq() > 0.5);
+            let noseX = this.size * 0.85; // Position of the propeller center
+            let propHeight = this.size * 0.9; // Full height (diameter) of the propeller rotation
+            let propWidthRunning = this.size * 0.15; // Width of the blur ellipse when running
+            let propWidthStopped = this.size * 0.05; // Width of the static propeller line when stopped
+            let engineRunning = this.isThrusting || (this.velocity.magSq() > 0.5); // Condition for blurred prop
 
+            // --- MODIFIED LOGIC HERE ---
             if (engineRunning) {
+                // Draw blurred propeller when thrusting or windmilling fast
                 fill(PROPELLER_BLUR_COLOR);
                 ellipse(noseX, 0, propWidthRunning, propHeight);
-            } else if (!this.isOnGround) { // Only draw stopped prop if airborne AND not running
+            } else {
+
                 fill(PROPELLER_STOPPED_COLOR);
-                rect(noseX, 0, propWidthStopped, propHeight);
+                rect(noseX, 0, propWidthStopped, propHeight); // Draw as a thin rectangle
             }
-            fill(this.accentColor); // Spinner
+
+            // --- END OF MODIFIED LOGIC ---
+
+            fill(this.accentColor); // Spinner (draw this last/on top)
             ellipse(noseX, 0, this.size * 0.2, this.size * 0.2);
         }
         pop(); // Restore drawing state (undoes translate, rotate, and scale)
         noStroke();
     }
+// --- END OF MODIFIED Plane.display() ---
+
 
     shoot() {
         // Check if plane can shoot based on state and angle
