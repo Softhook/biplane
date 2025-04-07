@@ -4,8 +4,8 @@
 const GRAVITY_FORCE = 0.07;
 const THRUST_FORCE = 0.16;
 const TURN_SPEED = 2.5;
-const DAMPING_FACTOR = 0.99;
-const GROUND_FRICTION = 0.93;
+const DAMPING_FACTOR = 0.985;
+const GROUND_FRICTION = 0.90;
 const BULLET_SPEED = 7;
 const SHOOT_COOLDOWN_FRAMES = 18;
 const RESPAWN_DELAY_FRAMES = 120; // Plane respawn
@@ -23,7 +23,7 @@ const MAX_SPEED_FOR_SOUND = 8;
 // --- Adjusted Sound Parameters ---
 const BASE_ENGINE_FREQ = 40;
 const MAX_ENGINE_FREQ = 120;
-const BASE_ENGINE_AMP = 0.04;
+const BASE_ENGINE_AMP = 0.00;
 const MAX_ENGINE_AMP = 0.18;
 const PROPELLER_BLUR_COLOR = [100, 100, 100, 150];
 const PROPELLER_STOPPED_COLOR = [80, 80, 80];
@@ -102,8 +102,8 @@ function setup() {
 
     // Initialize Planes
     let planeStartY = GROUND_Y - 10;
-    plane1 = new Plane(width * 0.2, planeStartY, PLANE1_COLOR_BODY, PLANE1_COLOR_WING, PLANE1_COLOR_ACCENT, CONTROLS_P1, 1);
-    plane2 = new Plane(width * 0.8, planeStartY, PLANE2_COLOR_BODY, PLANE2_COLOR_WING, PLANE2_COLOR_ACCENT, CONTROLS_P2, 2);
+    plane1 = new Plane(width * 0.1, planeStartY, PLANE1_COLOR_BODY, PLANE1_COLOR_WING, PLANE1_COLOR_ACCENT, CONTROLS_P1, 1);
+    plane2 = new Plane(width * 0.9, planeStartY, PLANE2_COLOR_BODY, PLANE2_COLOR_WING, PLANE2_COLOR_ACCENT, CONTROLS_P2, 2);
 
     // Initialize Scenery
     clouds = []; for (let i = 0; i < MAX_CLOUDS; i++) { clouds.push(new Cloud()); }
@@ -115,8 +115,17 @@ function setup() {
     // --- Initialize Sounds (with new parameters) ---
     engineSound1 = new p5.Oscillator('sawtooth'); engineSound1.freq(BASE_ENGINE_FREQ); engineSound1.amp(0);
     engineSound2 = new p5.Oscillator('sawtooth'); engineSound2.freq(BASE_ENGINE_FREQ); engineSound2.amp(0);
-    shootNoise = new p5.Noise('pink'); shootNoise.amp(0);
-    shootSoundEnv = new p5.Envelope(); shootSoundEnv.setADSR(0.001, 0.03, 0, 0.06); shootSoundEnv.setRange(0.5, 0);
+
+    // --- MODIFIED SHOOT SOUND ---
+    shootNoise = new p5.Noise('white'); // Use 'white' noise for a sharper sound
+    shootNoise.amp(0); // Start silent, envelope controls volume
+    shootSoundEnv = new p5.Envelope();
+    // ADSR: Attack(quick), Decay(shorter), Sustain(none), Release(shorter)
+    shootSoundEnv.setADSR(0.001, 0.02, 0, 0.04);
+    // Set Range: Max Volume (higher), Min Volume
+    shootSoundEnv.setRange(0.9, 0); // Increased max amplitude from 0.5 to 0.8
+    // --- END MODIFIED SHOOT SOUND --
+
     explosionNoise = new p5.Noise('pink'); explosionNoise.amp(0);
     explosionSoundEnv = new p5.Envelope(); explosionSoundEnv.setADSR(0.03, 0.5, 0.1, 0.7); explosionSoundEnv.setRange(0.7, 0);
 
@@ -600,7 +609,7 @@ class Plane {
     }
 
     respawn() {
-        let startX = (this.id === 1) ? width * 0.2 : width * 0.8;
+        let startX = (this.id === 1) ? width * 0.1 : width * 0.9;
         let startY = GROUND_Y - this.size * 0.8; // Respawn slightly above ground line
         this.startPos = createVector(startX, startY);
         this.position = this.startPos.copy();
