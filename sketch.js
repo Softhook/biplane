@@ -29,7 +29,7 @@ const PROPELLER_STOPPED_COLOR = [0];
 // const IS_RAINING = true; // REMOVED - Now dynamic
 let isCurrentlyRaining = false; // Start clear
 const MAX_RAINDROPS = 300;
-const RAIN_LIFT_REDUCTION_FACTOR = 0.80; // Reduces lift effectiveness by 20%
+const RAIN_LIFT_REDUCTION_FACTOR = 0.50; // Reduces lift effectiveness by 50%
 const RAIN_DARKNESS_FACTOR = 0.85; // How much to darken sky colors (slightly less dark)
 
 // --- Weather Timing (Frames) ---
@@ -474,71 +474,264 @@ class Plane {
     applyForce(force) { this.velocity.add(force); }
 
     update() {
-        if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; }
-        if (!this.isAlive) { if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05); return; }
+        // --- Respawn Timer ---
+        if (this.respawnTimer > 0) {
+            this.respawnTimer--;
+            if (this.respawnTimer <= 0) {
+                this.respawn();
+            }
+            return; // Don't update further if waiting to respawn
+        }
+
+        // --- Exit if not Alive ---
+        if (!this.isAlive) {
+            if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05);
+            return;
+        }
+
+        // --- Cooldowns and Timers ---
         if (this.shootCooldown > 0) { this.shootCooldown--; }
-        if (this.powerUpTimer > 0) { this.powerUpTimer--; if (this.powerUpTimer <= 0) { console.log(`Plane ${this.id} ${this.activePowerUp} expired.`); this.activePowerUp = null; } }
+        if (this.powerUpTimer > 0) {
+            this.powerUpTimer--;
+            if (this.powerUpTimer <= 0) {
+                console.log(`Plane ${this.id} ${this.activePowerUp} expired.`);
+                this.activePowerUp = null;
+            }
+        }
 
-        if (this.isTurningLeft) { this.angle -= TURN_SPEED; } if (this.isTurningRight) { this.angle += TURN_SPEED; }
+        // --- Turning ---
+        if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
+        if (this.isTurningRight) { this.angle += TURN_SPEED; }
 
-        let thrustVector = createVector(0, 0); let currentThrustForce = THRUST_FORCE;
+
+        // --- START: Determine Stall State (V26 - Unified Sine Logic) ---
+        let checkAngle = this.angle; // For logging
+        let normAngle = (this.angle % 360 + 360) % 360; // For other checks potentially
+        let currentlyStalled = this.isStalled; // Store state before potential change
+
+        // Calculate vertical orientation (-1 down, +1 up) using standard angle convention
+        // p5.js sin() uses DEGREES because angleMode(DEGREES) is set in setup()
+        let verticalPointing = sin(this.angle);
+
+        // Define thresholds based on sine of original angles
+        const STALL_ENTRY_SIN_THRESHOLD = sin(STALL_ANGLE_THRESHOLD); // sin(-70) approx -0.9397
+        const STALL_RECOVERY_SIN_THRESHOLD = sin(STALL_RECOVERY_ANGLE); // sin(-50) approx -0.7660
+
+        if (!this.isOnGround) { // Only check stall state if airborne
+            if (!this.isStalled) {
+                // --- Check for Entering a Stall (SAME FOR BOTH PLANES) ---
+                // Stall if pointing steeply up (sin very negative)
+                let enterStall = (verticalPointing < STALL_ENTRY_SIN_THRESHOLD);
+
+                if (enterStall) {
+                     this.isStalled = true;
+                     if (!currentlyStalled) { console.log(`Plane ${this.id} stalled! Angle: ${checkAngle.toFixed(1)} Sin: ${verticalPointing.toFixed(3)} [Entry]`); }
+                }
+            } else {
+                // --- Check for Exiting Stall (if currently stalled - SAME FOR BOTH PLANES) ---
+                // Recover if pointing less steeply up (sin less negative)
+                let exitStall = (verticalPointing > STALL_RECOVERY_SIN_THRESHOLD);
+
+                 if (exitStall) {
+                     this.isStalled = false;
+                     if (currentlyStalled) { console.log(`Plane ${this.id} recovered! Angle: ${checkAngle.toFixed(1)} Sin: ${verticalPointing.toFixed(3)} [Exit]`); }
+                 }
+            }
+        } else { // If on ground, ensure stall is false
+            if (this.isStalled) {
+                this.isStalled = false;
+            }
+        }
+        // --- END: Determine Stall State ---
+
+
+        // --- Forces ---
+        let thrustVector = createVector(0, 0);
+        let currentThrustForce = THRUST_FORCE; // Start with base thrust
         if (this.activePowerUp === 'SpeedBoost') { currentThrustForce *= 1.6; }
-        if (this.isStalled) { currentThrustForce *= STALL_EFFECT_FACTOR; }
-        if (this.isThrusting) { thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce); }
 
+        // APPLY STALL EFFECT TO THRUST
+        if (this.isStalled) {
+            currentThrustForce *= STALL_EFFECT_FACTOR; // Reduce thrust force if stalled
+        }
+
+        // Calculate final thrust vector if thrusting
+        if (this.isThrusting) {
+             thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce);
+        }
+
+
+        // --- Physics based on Grounded vs Airborne ---
         if (this.isOnGround) {
+            // Apply ground friction
             this.velocity.x *= GROUND_FRICTION;
-            let normalizedAngle = (this.angle % 360 + 360) % 360; let isAngledUpSlightly = (this.id === 1) ? (this.angle < -5 && this.angle > -90) : (normalizedAngle > 185 && normalizedAngle < 270);
-            if (this.isThrusting) { if (isAngledUpSlightly) { this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15)); } else { this.applyForce(createVector(thrustVector.x, 0)); } }
-             if (!this.isThrusting || !isAngledUpSlightly) { this.applyForce(createVector(0, GRAVITY_FORCE * 2)); } else { this.applyForce(createVector(0, GRAVITY_FORCE * 0.5)); }
-        } else {
-            this.applyForce(thrustVector); // Thrust
+
+            // Determine if angled correctly for thrusting along ground or slightly up
+            let isAngledUpSlightly = (this.id === 1) ? (this.angle < -5 && this.angle > -90) : (normAngle > 185 && normAngle < 270);
+
+            // Apply thrust
+            if (this.isThrusting) {
+                if (isAngledUpSlightly) {
+                    this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15));
+                } else {
+                    this.applyForce(createVector(thrustVector.x, 0));
+                }
+            }
+
+            // Apply gravity (stronger on ground if not trying to take off)
+             if (!this.isThrusting || !isAngledUpSlightly) {
+                 this.applyForce(createVector(0, GRAVITY_FORCE * 2));
+             } else {
+                 this.applyForce(createVector(0, GRAVITY_FORCE * 0.5)); // Less gravity when trying takeoff
+             }
+
+        } else { // --- Airborne Physics ---
+            // Apply thrust (already calculated with potential stall reduction)
+            this.applyForce(thrustVector);
+
+            // Calculate base lift
             let speed = this.velocity.mag();
             let liftMagnitude = speed * LIFT_FACTOR;
+
             // --- Apply Rain Effect (Conditional) ---
             if (isCurrentlyRaining) { // Check the global variable
                  liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR;
             }
             // --- End Rain Effect ---
-            if (this.isStalled) { liftMagnitude *= 0.15; }
-            let liftForce = createVector(0, -liftMagnitude); this.applyForce(liftForce); // Lift
-            this.applyForce(createVector(0, GRAVITY_FORCE)); // Gravity
-            this.velocity.mult(DAMPING_FACTOR); // Air Drag
-        }
 
-        this.position.add(this.velocity); // Update Position
+            // --- Apply stall effect to lift (if currently stalled) ---
+            if (this.isStalled) {
+                liftMagnitude *= STALL_EFFECT_FACTOR; // Drastically reduce lift
+            }
 
-        // Ground Interaction / State Changes
+            // Apply lift force (perpendicular upwards relative to world)
+            let liftForce = createVector(0, -liftMagnitude);
+            this.applyForce(liftForce);
+
+            // Apply gravity
+            this.applyForce(createVector(0, GRAVITY_FORCE));
+
+            // Apply air drag
+            this.velocity.mult(DAMPING_FACTOR);
+        } // End of Airborne vs Grounded block
+
+        // --- Update Position ---
+        this.position.add(this.velocity);
+
+        // --- Ground Interaction / State Changes (Post-Position Update) ---
         let groundCheckY = GROUND_Y - this.size * 0.8;
+
+        // Check for Landing
         if (this.position.y >= groundCheckY && !this.isOnGround) {
-             let normalizedAngle = (this.angle % 360 + 360) % 360; let isTooSteep = (normalizedAngle > 45 && normalizedAngle < 135) || (normalizedAngle > 225 && normalizedAngle < 315); let verticalSpeed = this.velocity.y;
-             if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && this.activePowerUp !== 'Shield') { console.log(`Plane ${this.id} CRASH LANDED! V Speed: ${verticalSpeed.toFixed(2)}, Angle: ${this.angle.toFixed(1)}, TooSteep: ${isTooSteep}`); this.hit(true); return; }
-             else { this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0; if (this.activePowerUp === 'Shield' && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) { console.log(`Plane ${this.id} Shield absorbed hard landing!`); this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.5); } else { /* console.log(`Plane ${this.id} landed safely. V Speed: ${verticalSpeed.toFixed(2)}`); */ } }
-        } else if (this.isOnGround) {
-            if (this.position.y > groundCheckY) { this.position.y = groundCheckY; if(this.velocity.y > 0) this.velocity.y = 0; }
-            let horizontalSpeed = abs(this.velocity.x); let isAngledForTakeoff = false; let normalizedAngle = (this.angle % 360 + 360) % 360;
-            if (this.id === 1) { isAngledForTakeoff = (this.angle < -5 && this.angle > -85); } else { isAngledForTakeoff = (normalizedAngle > 185 && normalizedAngle < 265); }
-            if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED) { this.isOnGround = false; this.isStalled = false; this.velocity.y -= THRUST_FORCE * 0.6; console.log(`Plane ${this.id} took off. Speed: ${horizontalSpeed.toFixed(2)}`); }
-        } else {
-            this.isOnGround = false; let normAngle = (this.angle % 360 + 360) % 360; let checkAngle = this.angle; let isTryingStall = false; let isTryingRecover = false;
-             if (normAngle > 90 && normAngle < 270) { isTryingStall = normAngle > (180 - STALL_ANGLE_THRESHOLD); isTryingRecover = normAngle < (180 - STALL_RECOVERY_ANGLE); } else { isTryingStall = checkAngle < STALL_ANGLE_THRESHOLD; isTryingRecover = checkAngle > STALL_RECOVERY_ANGLE; }
-             if(isTryingStall) { if (!this.isStalled) console.log(`Plane ${this.id} stalled! Angle: ${checkAngle.toFixed(1)} Norm: ${normAngle.toFixed(1)}`); this.isStalled = true; } else if (isTryingRecover) { if (this.isStalled) console.log(`Plane ${this.id} recovered from stall. Angle: ${checkAngle.toFixed(1)} Norm: ${normAngle.toFixed(1)}`); this.isStalled = false; }
+             let isTooSteep = (normAngle > 45 && normAngle < 135) || (normAngle > 225 && normAngle < 315);
+             let verticalSpeed = this.velocity.y;
+
+             // Check for crash landing
+             if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && this.activePowerUp !== 'Shield') {
+                 console.log(`Plane ${this.id} CRASH LANDED! V Speed: ${verticalSpeed.toFixed(2)}, Angle: ${this.angle.toFixed(1)}, TooSteep: ${isTooSteep}`);
+                 this.hit(true); // Crash counts as a hit
+                 return; // Stop update if crashed
+             }
+             else { // Safe landing (or shield absorbed impact)
+                 this.isOnGround = true;
+                 this.isStalled = false; // Ensure stall is off upon landing
+                 this.position.y = groundCheckY; // Snap to ground level
+                 this.velocity.y = 0; // Stop vertical movement
+
+                 if (this.activePowerUp === 'Shield' && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) {
+                     console.log(`Plane ${this.id} Shield absorbed hard landing!`);
+                     this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.5);
+                 } else {
+                     /* console.log(`Plane ${this.id} landed safely. V Speed: ${verticalSpeed.toFixed(2)}`); */
+                 }
+             }
+        }
+        // Check for Takeoff / Keep on ground
+        else if (this.isOnGround) {
+            // Ensure plane stays on ground if it dips slightly below
+            if (this.position.y > groundCheckY) {
+                this.position.y = groundCheckY;
+                if(this.velocity.y > 0) this.velocity.y = 0;
+            }
+
+            // Check takeoff conditions
+            let horizontalSpeed = abs(this.velocity.x);
+            let isAngledForTakeoff = false;
+            if (this.id === 1) { // Plane 1 angled up (negative angles)
+                isAngledForTakeoff = (this.angle < -5 && this.angle > -85);
+            } else { // Plane 2 angled up (angles > 180)
+                isAngledForTakeoff = (normAngle > 185 && normAngle < 265);
+            }
+
+            // Execute takeoff
+            if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED) {
+                this.isOnGround = false;
+                this.isStalled = false; // Reset stall state on takeoff
+                this.velocity.y -= THRUST_FORCE * 0.6; // Give a little initial lift boost
+                console.log(`Plane ${this.id} took off. Speed: ${horizontalSpeed.toFixed(2)}`);
+            }
         }
 
-        // Boundary Constraints
-        if (this.position.x > width + this.size) { this.position.x = -this.size; } else if (this.position.x < -this.size) { this.position.x = width + this.size; }
-        if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
 
-        // Collisions & Sound
-        if (!this.isAlive) return;
-        if (this.checkCollisionHut(hut)) return;
-        if (this.isAlive && balloon.isAlive && this.activePowerUp !== 'Shield') { let planeCollisionRadius = this.size * 0.9; let distance = dist(this.position.x, this.position.y, balloon.pos.x, balloon.pos.y); let combinedRadius = planeCollisionRadius + balloon.radius; if (distance < combinedRadius) { console.log(`Plane ${this.id} crashed into balloon!`); this.hit(true); return; } }
-        else if (this.isAlive && balloon.isAlive && this.activePowerUp === 'Shield') { let planeCollisionRadius = this.size * 0.9; let distance = dist(this.position.x, this.position.y, balloon.pos.x, balloon.pos.y); let combinedRadius = planeCollisionRadius + balloon.radius; if (distance < combinedRadius) { console.log(`Plane ${this.id} Shield popped balloon!`); balloon.hit(); this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.3); } }
+        // --- Boundary Constraints ---
+        if (this.position.x > width + this.size) { this.position.x = -this.size; }
+        else if (this.position.x < -this.size) { this.position.x = width + this.size; }
+        if (this.position.y < this.size / 2) { // Ceiling boundary
+            this.position.y = this.size / 2;
+            if (this.velocity.y < 0) { this.velocity.y = 0; } // Stop upward velocity at ceiling
+        }
 
-        // Engine Sound
-        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) { let speed = this.velocity.mag(); let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true); let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP; if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; } if (this.activePowerUp === 'SpeedBoost') { targetFreq *= 1.1; targetAmp *= 1.1; } if (abs(this.engineSound.getAmp() - targetAmp) > 0.001 || targetAmp > 0.01) { this.engineSound.amp(targetAmp, 0.1); } else if (targetAmp < 0.01 && this.engineSound.getAmp() > 0) { this.engineSound.amp(0, 0.1); } this.engineSound.freq(targetFreq, 0.1); }
-        else if (this.engineSound && this.engineSound.getAmp() > 0) { this.engineSound.amp(0, 0.1); }
-    }
+        // --- Collisions & Sound (if still alive after potential crash landing) ---
+        if (!this.isAlive) return; // Double check after landing/crash check
+
+        // Hut Collision
+        if (this.checkCollisionHut(hut)) return; // hit() called inside checkCollisionHut
+
+        // Balloon Collision
+        if (balloon.isAlive) {
+            let planeCollisionRadius = this.size * 0.9;
+            let distance = dist(this.position.x, this.position.y, balloon.pos.x, balloon.pos.y);
+            let combinedRadius = planeCollisionRadius + balloon.radius;
+
+            if (distance < combinedRadius) {
+                if (this.activePowerUp === 'Shield') {
+                    // Shield pops balloon
+                    console.log(`Plane ${this.id} Shield popped balloon!`);
+                    balloon.hit(); // Balloon handles score/powerup drop
+                    this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.3); // Reduce shield timer
+                } else {
+                    // Plane crashes into balloon
+                    console.log(`Plane ${this.id} crashed into balloon!`);
+                    this.hit(true); // Plane crashes
+                    return; // Stop update
+                }
+            }
+        }
+
+
+        // --- Engine Sound ---
+        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) {
+            let speed = this.velocity.mag();
+            let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
+            let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
+
+            // Adjust sound for stall/boost
+            if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; } // Sound reflects stall state
+            if (this.activePowerUp === 'SpeedBoost') { targetFreq *= 1.1; targetAmp *= 1.1; }
+
+            // Smoothly adjust amp/freq
+            if (abs(this.engineSound.getAmp() - targetAmp) > 0.001 || targetAmp > 0.01) {
+                this.engineSound.amp(targetAmp, 0.1);
+            } else if (targetAmp < 0.01 && this.engineSound.getAmp() > 0) {
+                 this.engineSound.amp(0, 0.1); // Ramp down completely if stopped/gliding
+            }
+            this.engineSound.freq(targetFreq, 0.1);
+        }
+        // Ensure sound stops if plane becomes not alive (redundant check, but safe)
+        else if (this.engineSound && this.engineSound.getAmp() > 0) {
+            this.engineSound.amp(0, 0.0);
+        }
+    } // --- End of update() method ---
 
     display() { push(); translate(this.position.x, this.position.y); rotate(this.angle); if (this.id === 2) { scale(1, -1); } if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) { /* Flicker */ } else { stroke(0); strokeWeight(1.5); let pp = this.planePoints; fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.accentColor); beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.wingColor); beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE); noFill(); stroke(0, 150); strokeWeight(1.5); if (pp.cockpit.length >= 2) { beginShape(); curveVertex(pp.cockpit[0].x, pp.cockpit[0].y); for(let p of pp.cockpit) { curveVertex(p.x, p.y); } curveVertex(pp.cockpit[pp.cockpit.length - 1].x, pp.cockpit[pp.cockpit.length - 1].y); endShape(); } if (this.isOnGround || (!this.isOnGround && this.position.y > GROUND_Y - this.size * 3) || (!this.isOnGround && this.velocity.y > 0.3)) { fill(40); noStroke(); ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2); ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2); stroke(60); strokeWeight(3); line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1); line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1); } noStroke(); let noseX = this.size * 0.85; let propHeight = this.size * 0.9; let propWidthRunning = this.size * 0.15; let propWidthStopped = this.size * 0.05; let engineRunning = this.isThrusting || (this.velocity.magSq() > 0.5); if (engineRunning) { fill(PROPELLER_BLUR_COLOR); ellipse(noseX, 0, propWidthRunning, propHeight); } else { fill(PROPELLER_STOPPED_COLOR); rect(noseX, 0, propWidthStopped, propHeight); } fill(this.accentColor); ellipse(noseX, 0, this.size * 0.2, this.size * 0.2); if (this.activePowerUp === 'Shield' && this.powerUpTimer > 0) { let shieldAlpha = SHIELD_COLOR[3] * (0.7 + sin(frameCount * 4) * 0.3); if (this.powerUpTimer < 120 && floor(frameCount / 5) % 2 === 0) { shieldAlpha = 0; } fill(SHIELD_COLOR[0], SHIELD_COLOR[1], SHIELD_COLOR[2], shieldAlpha); noStroke(); ellipse(0, 0, this.size * 2.8, this.size * 2.2); } } pop(); noStroke(); }
 
@@ -592,7 +785,7 @@ class Plane {
         this.isAlive = false; this.isOnGround = false; this.isStalled = false; this.activePowerUp = null; this.powerUpTimer = 0;
         this.velocity = createVector(random(-1.5, 1.5), -2.5); this.respawnTimer = RESPAWN_DELAY_FRAMES;
         createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
-        if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05);
+        if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0);
         if (causedByCrashOrBomb && bullet === null) {
              if (this.id === 1) { score2++; console.log("Crash/Bomb! Point for Player 2!"); }
              else { score1++; console.log("Crash/Bomb! Point for Player 1!"); }
