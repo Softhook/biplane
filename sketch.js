@@ -24,29 +24,23 @@ const MAX_SPEED_FOR_SOUND = 8;
 const PROPELLER_BLUR_COLOR = [100, 100, 100, 150];
 const PROPELLER_STOPPED_COLOR = [0];
 
-// --- Weather Configuration --- // MODIFIED SECTION START
-// --- Rain ---
-// const IS_RAINING = true; // REMOVED - Now dynamic
+// --- Weather Configuration ---
 let isCurrentlyRaining = false; // Start clear
 const MAX_RAINDROPS = 300;
-const RAIN_LIFT_REDUCTION_FACTOR = 0.50; // Reduces lift effectiveness by 50%
-const RAIN_DARKNESS_FACTOR = 0.85; // How much to darken sky colors (slightly less dark)
-
-// --- Weather Timing (Frames) ---
-const RAIN_DURATION_MIN = 60 * 15; // Min 15 seconds of rain
-const RAIN_DURATION_MAX = 60 * 45; // Max 45 seconds of rain
-const CLEAR_DURATION_MIN = 60 * 20; // Min 20 seconds clear
-const CLEAR_DURATION_MAX = 60 * 70; // Max 70 seconds clear
-
-let rainTimer = 0;      // Time left in current rain phase
-let clearTimer = 0;     // Time left in current clear phase
-// --- Weather Configuration --- // MODIFIED SECTION END
+const RAIN_LIFT_REDUCTION_FACTOR = 0.50;
+const RAIN_DARKNESS_FACTOR = 0.85;
+const RAIN_DURATION_MIN = 60 * 15;
+const RAIN_DURATION_MAX = 60 * 45;
+const CLEAR_DURATION_MIN = 60 * 20;
+const CLEAR_DURATION_MAX = 60 * 70;
+let rainTimer = 0;
+let clearTimer = 0;
 
 
 // --- Power-up Configuration ---
-const POWERUP_DURATION_FRAMES = 900; // Increased duration (15 seconds at 60fps)
-const POWERUP_FALL_SPEED = 1.5;
-const POWERUP_SIZE = 18;
+const POWERUP_DURATION_FRAMES = 1200;
+const POWERUP_FALL_SPEED = 0.5;
+const POWERUP_SIZE = 30;
 const POWERUP_TYPES = ['RapidFire', 'SpeedBoost', 'Shield', 'TripleShot', 'Bomb'];
 const POWERUP_COLORS = {
     RapidFire: [255, 255, 0],   // Yellow
@@ -56,11 +50,13 @@ const POWERUP_COLORS = {
     Bomb: [80, 80, 80]          // Dark Gray
 };
 const SHIELD_COLOR = [150, 150, 255, 100];
-const TRIPLE_SHOT_SPREAD_ANGLE = 6; // Degrees spread for triple shot
+const TRIPLE_SHOT_SPREAD_ANGLE = 6;
 const BOMB_DROP_VELOCITY_Y = 1.5;
 const BOMB_FUSE_FRAMES = 90;
-const BOMB_EXPLOSION_RADIUS = 60;
+const BOMB_EXPLOSION_RADIUS = 70; // Increased radius slightly for hut
 const BOMB_EXPLOSION_PARTICLES = 45;
+const HUT_DESTRUCTION_PARTICLES = 70; // More particles for hut destruction
+const HUT_RUBBLE_PIECES = 25; // Number of static rubble pieces to draw
 
 // --- Sound Parameters ---
 const BASE_ENGINE_FREQ = 40;
@@ -76,16 +72,16 @@ const CONTROLS_P2 = { thrust: 38, left: 37, right: 39, shoot: 40 }; // Arrows
 let plane1, plane2;
 let bullets = [];
 let clouds = [];
-let hut;
+let hut; // Will be an object { x, y, w, h, destroyed, rubbleDetails: [] }
 let balloon;
 let score1 = 0;
 let score2 = 0;
 let keys = {};
 let particles = [];
 let stars = [];
-let rainDrops = []; // Array for rain drops
+let rainDrops = [];
 let powerUps = [];
-let bombs = []; // Array for bombs
+let bombs = [];
 
 // --- Sound Variables ---
 let engineSound1, engineSound2;
@@ -121,6 +117,7 @@ const SNOW_COLOR = [240, 245, 250];
 const HUT_WALL = [150, 120, 90];
 const HUT_ROOF = [80, 55, 35];
 const HUT_DOOR = [60, 40, 30];
+const HUT_RUBBLE_COLORS = [ [100, 80, 60], [70, 50, 30], [60, 40, 30], [120, 100, 80], [140, 110, 85], [85, 65, 45] ]; // Colors for destroyed hut particles/drawing
 const CLOUD_COLOR = [200, 200, 215]; // Slightly grayer clouds in rain
 const CLOUD_SHADOW = [160, 160, 180, 180];
 const PLANE1_COLOR_BODY = [200, 100, 30];
@@ -139,7 +136,6 @@ const BALLOON_BASKET = [160, 100, 40];
 const BALLOON_ROPE = [80, 60, 40];
 const RAINDROP_COLOR = [150, 180, 220, 150];
 
-// MODIFIED: Allow darkening for rain - Initialize AFTER base colors are defined
 let currentSkyTop = [...SKY_TOP];
 let currentSkyUpperBand = [...SKY_UPPER_BAND];
 let currentSkyMidBlue = [...SKY_MID_BLUE];
@@ -201,7 +197,15 @@ function calculateLayout() {
     GROUND_Y = height * GROUND_LEVEL_Y_FRAC;
     hutX = width / 2;
     hutY = GROUND_Y - HUT_HEIGHT / 2;
-    hut = { x: hutX, y: hutY, w: HUT_WIDTH, h: HUT_HEIGHT };
+    // Initialize or update hut object
+    hut = {
+        x: hutX,
+        y: hutY,
+        w: HUT_WIDTH,
+        h: HUT_HEIGHT,
+        destroyed: hut ? hut.destroyed : false, // Preserve destroyed state on resize
+        rubbleDetails: hut ? hut.rubbleDetails : null // Preserve rubble details on resize
+    };
 
     if (stars && stars.length > 0) {
         for (let star of stars) {
@@ -213,6 +217,10 @@ function calculateLayout() {
         let planeStartY = GROUND_Y - 10;
         if (plane1) plane1.startPos = createVector(width * 0.1, planeStartY);
         if (plane2) plane2.startPos = createVector(width * 0.9, planeStartY);
+        if (hut) { // Reset hut on intro screen (e.g., after resize)
+            hut.destroyed = false;
+            hut.rubbleDetails = null;
+        }
     }
 
     // Update visuals based on current rain state (ensures correct colors after resize)
@@ -281,7 +289,10 @@ function draw() {
             if (bullets[i].ownerId === 1) { score1++; } else { score2++; }
             bullets.splice(i, 1); continue;
         }
-        if (bullets[i].checkCollisionHut(hut)) { createExplosion(bullets[i].position.x, bullets[i].position.y, 5, HUT_WALL); bullets.splice(i, 1); continue; } // Simpler hut hit effect color
+        // Pass the actual hut object to checkCollisionHut
+        if (bullets[i].checkCollisionHut(hut)) {
+             createExplosion(bullets[i].position.x, bullets[i].position.y, 5, HUT_WALL); bullets.splice(i, 1); continue;
+        } // Simpler hut hit effect color
         if (bullets[i].isOffscreen()) { bullets.splice(i, 1); } else { bullets[i].display(); }
     }
 
@@ -292,12 +303,12 @@ function draw() {
         // Bomb collisions (check after update) - Plane/Hut/Ground
         let exploded = false;
         if (bombs[i].fuseTimer <= 0) {
-             bombs[i].explode(); exploded = true;
+             bombs[i].explode(hut); exploded = true; // Pass hut object to explode
         } else {
-             if (plane1.isAlive && bombs[i].ownerId !== plane1.id && bombs[i].checkCollision(plane1)) { bombs[i].explode(); exploded = true; }
-             else if (plane2.isAlive && bombs[i].ownerId !== plane2.id && bombs[i].checkCollision(plane2)) { bombs[i].explode(); exploded = true; }
-             else if (bombs[i].checkCollisionHut(hut)) { bombs[i].explode(); exploded = true; }
-             else if (bombs[i].checkCollisionGround()) { bombs[i].explode(); exploded = true; }
+             if (plane1.isAlive && bombs[i].ownerId !== plane1.id && bombs[i].checkCollision(plane1)) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
+             else if (plane2.isAlive && bombs[i].ownerId !== plane2.id && bombs[i].checkCollision(plane2)) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
+             else if (bombs[i].checkCollisionHut(hut)) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
+             else if (bombs[i].checkCollisionGround()) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
         }
 
         if (exploded || bombs[i].isOffscreen()) {
@@ -322,7 +333,7 @@ function draw() {
     // Scenery
     for (let cloud of clouds) { cloud.update(); cloud.display(); }
     balloon.update(); balloon.display();
-    drawHut();
+    drawHut(); // Draws based on hut.destroyed and hut.rubbleDetails state
 
     // --- MODIFIED: Update and Draw Raindrops (Conditional) ---
     if (isCurrentlyRaining) {
@@ -351,6 +362,12 @@ function drawIntroScreen() {
     // Use current (potentially darkened) sky colors for intro too
     drawBackground();
     drawEnvironment();
+    if (hut) { // Ensure hut is not destroyed on intro
+        hut.destroyed = false;
+        hut.rubbleDetails = null;
+    }
+    drawHut(); // Draw the intact hut on intro
+
     fill(0, 0, 0, 150);
     rect(width / 2, height / 2, width, height);
     textFont('monospace'); fill(255, 215, 0); stroke(0); strokeWeight(4); textSize(min(width * 0.1, height * 0.15)); textAlign(CENTER, CENTER); text("Biplane Battle", width / 2, height * 0.2);
@@ -365,6 +382,10 @@ function drawIntroScreen() {
 function keyPressed() {
     if (gameState === 'intro') {
         gameState = 'playing';
+        if (hut) { // Ensure hut starts intact when game starts
+             hut.destroyed = false;
+             hut.rubbleDetails = null;
+        }
         if (audioStarted && !soundNodesStarted) {
             try {
                  engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start();
@@ -436,7 +457,62 @@ function drawBackground() {
 }
 
 function drawEnvironment() { noStroke(); fill(MOUNTAIN_DISTANT); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y * 0.85); vertex(width * 0.3, GROUND_Y * 0.88); vertex(width * 0.5, GROUND_Y * 0.78); vertex(width * 0.7, GROUND_Y * 0.90); vertex(width * 0.9, GROUND_Y * 0.82); vertex(width, GROUND_Y); endShape(CLOSE); let peak1_baseL = { x: width * 0.05, y: GROUND_Y }; let peak1_top = { x: width * 0.3, y: GROUND_Y * 0.55 }; let peak1_baseR = { x: width * 0.45, y: GROUND_Y }; let peak2_baseL = { x: width * 0.4, y: GROUND_Y }; let peak2_top = { x: width * 0.65, y: GROUND_Y * 0.45 }; let peak2_baseR = { x: width * 0.9, y: GROUND_Y }; fill(MOUNTAIN_DARK); triangle(peak1_baseL.x, peak1_baseL.y, peak1_top.x, peak1_top.y, peak1_baseR.x, peak1_baseR.y); let snowLevel1 = 0.35; fill(SNOW_COLOR); beginShape(); vertex(peak1_top.x, peak1_top.y); let snowP1_L_x = lerp(peak1_top.x, peak1_baseL.x, snowLevel1 * 1.2); let snowP1_L_y = lerp(peak1_top.y, peak1_baseL.y, snowLevel1); vertex(snowP1_L_x, snowP1_L_y); let snowP1_R_x = lerp(peak1_top.x, peak1_baseR.x, snowLevel1 * 1.1); let snowP1_R_y = lerp(peak1_top.y, peak1_baseR.y, snowLevel1); vertex(snowP1_R_x, snowP1_R_y); endShape(CLOSE); fill(MOUNTAIN_LIGHT); triangle(peak2_baseL.x, peak2_baseL.y, peak2_top.x, peak2_top.y, peak2_baseR.x, peak2_baseR.y); let snowLevel2 = 0.4; fill(SNOW_COLOR); beginShape(); vertex(peak2_top.x, peak2_top.y); let snowP2_L_x = lerp(peak2_top.x, peak2_baseL.x, snowLevel2 * 1.15); let snowP2_L_y = lerp(peak2_top.y, peak2_baseL.y, snowLevel2); vertex(snowP2_L_x, snowP2_L_y); let snowP2_R_x = lerp(peak2_top.x, peak2_baseR.x, snowLevel2 * 1.1); let snowP2_R_y = lerp(peak2_top.y, peak2_baseR.y, snowLevel2); vertex(snowP2_R_x, snowP2_R_y); endShape(CLOSE); fill(MOUNTAIN_GREEN); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y); curveVertex(width * 0.15, GROUND_Y * 0.95); vertex(width * 0.2, GROUND_Y * 0.85); curveVertex(width * 0.28, GROUND_Y * 0.98); vertex(width * 0.35, GROUND_Y); vertex(peak1_baseR.x, GROUND_Y); vertex(peak2_baseL.x, GROUND_Y); curveVertex(width * 0.58, GROUND_Y * 0.9); vertex(width * 0.6, GROUND_Y * 0.8); curveVertex(width * 0.75, GROUND_Y); vertex(width * 0.85, GROUND_Y); vertex(peak2_baseR.x, GROUND_Y); vertex(width, GROUND_Y); vertex(width, height); vertex(0, height); endShape(CLOSE); fill(GROUND_COLOR); rect(width / 2, GROUND_Y + (height - GROUND_Y) / 2, width, height - GROUND_Y); strokeWeight(1); for(let i = 0; i < 10; i++) { let lineY = GROUND_Y + (height - GROUND_Y) * (i / 10) * random(0.8, 1.2); let lineCol = lerpColor(color(GROUND_COLOR), color(GROUND_HIGHLIGHT), random(0.3, 0.7)); stroke(red(lineCol), green(lineCol), blue(lineCol), 100); line(0, lineY, width, lineY); } noStroke(); }
-function drawHut() { push(); translate(hutX, hutY); noStroke(); fill(HUT_ROOF); triangle(-HUT_WIDTH / 2 - 5, -HUT_HEIGHT / 2, HUT_WIDTH / 2 + 5, -HUT_HEIGHT / 2, 0, -HUT_HEIGHT / 2 - HUT_HEIGHT * 0.6); fill(HUT_WALL); rect(0, 0, HUT_WIDTH, HUT_HEIGHT); fill(HUT_DOOR); rect(-HUT_WIDTH * 0.25, HUT_HEIGHT * 0.1, HUT_WIDTH * 0.3, HUT_HEIGHT * 0.7, 3); fill(currentSkyLowerBlue[0]*0.7, currentSkyLowerBlue[1]*0.7, currentSkyLowerBlue[2]*0.7); rect(HUT_WIDTH * 0.25, -HUT_HEIGHT * 0.1, HUT_WIDTH * 0.35, HUT_HEIGHT * 0.35, 2); stroke(HUT_ROOF); strokeWeight(2); let winX = HUT_WIDTH * 0.25; let winY = -HUT_HEIGHT * 0.1; let winW = HUT_WIDTH * 0.35; let winH = HUT_HEIGHT * 0.35; line(winX - winW/2, winY, winX + winW/2, winY); line(winX, winY - winH/2, winX, winY + winH/2); noStroke(); stroke(HUT_WALL[0] * 0.8, HUT_WALL[1] * 0.8, HUT_WALL[2] * 0.8, 150); strokeWeight(1); for(let i = 0; i < 6; i++) { let lineY = -HUT_HEIGHT/2 + (HUT_HEIGHT / 6) * (i + 0.5); line(-HUT_WIDTH/2, lineY, HUT_WIDTH/2, lineY); } noStroke(); pop(); }
+
+function drawHut() {
+    // Don't draw if hut doesn't exist
+    if (!hut) return;
+
+    if (hut.destroyed) {
+        // Draw the static rubble pile
+        if (hut.rubbleDetails && hut.rubbleDetails.length > 0) {
+            push();
+            translate(hut.x, hut.y + hut.h * 0.2); // Base translation for rubble pile
+            noStroke();
+            // Draw crater effect (optional, can be simple)
+            fill(GROUND_COLOR[0]*0.8, GROUND_COLOR[1]*0.8, GROUND_COLOR[2]*0.8);
+            ellipse(0, GROUND_Y - hut.y - hut.h * 0.2, hut.w * 1.1, hut.h * 0.4);
+
+            // Draw the pre-calculated rubble pieces
+            for (const detail of hut.rubbleDetails) {
+                fill(detail.color);
+                // Draw rubble relative to the translated origin
+                rect(detail.x, detail.y - hut.h * 0.2, detail.w, detail.h, detail.r); // Adjust Y based on translation
+            }
+            pop();
+        }
+    } else {
+        // Draw the intact hut
+        push();
+        translate(hut.x, hut.y);
+        noStroke();
+        // Roof
+        fill(HUT_ROOF);
+        triangle(-hut.w / 2 - 5, -hut.h / 2, hut.w / 2 + 5, -hut.h / 2, 0, -hut.h / 2 - hut.h * 0.6);
+        // Walls
+        fill(HUT_WALL);
+        rect(0, 0, hut.w, hut.h);
+        // Door
+        fill(HUT_DOOR);
+        rect(-hut.w * 0.25, hut.h * 0.1, hut.w * 0.3, hut.h * 0.7, 3);
+        // Window
+        fill(currentSkyLowerBlue[0]*0.7, currentSkyLowerBlue[1]*0.7, currentSkyLowerBlue[2]*0.7);
+        rect(hut.w * 0.25, -hut.h * 0.1, hut.w * 0.35, hut.h * 0.35, 2);
+        // Window Panes
+        stroke(HUT_ROOF); strokeWeight(2);
+        let winX = hut.w * 0.25; let winY = -hut.h * 0.1; let winW = hut.w * 0.35; let winH = hut.h * 0.35;
+        line(winX - winW/2, winY, winX + winW/2, winY); // Horizontal
+        line(winX, winY - winH/2, winX, winY + winH/2); // Vertical
+        // Wall Planks
+        noStroke(); stroke(HUT_WALL[0] * 0.8, HUT_WALL[1] * 0.8, HUT_WALL[2] * 0.8, 150); strokeWeight(1);
+        for(let i = 0; i < 6; i++) {
+            let lineY = -hut.h/2 + (hut.h / 6) * (i + 0.5);
+            line(-hut.w/2, lineY, hut.w/2, lineY);
+        }
+        noStroke();
+        pop();
+    }
+}
+
 function drawUI() { textSize(40); textFont('monospace'); fill(SCORE_COLOR); stroke(0); strokeWeight(3); textAlign(LEFT, BOTTOM); text(nf(score1, 2), 20, height - 10); textAlign(RIGHT, BOTTOM); text(nf(score2, 2), width - 20, height - 10); noStroke(); }
 function displayPowerUpStatus(plane, x, y) { if (!plane.isAlive || !plane.activePowerUp) return; push(); textAlign(LEFT, BOTTOM); textSize(18); textFont('monospace'); let powerUpName = plane.activePowerUp; let remainingTime = ceil(plane.powerUpTimer / 60); let displayColor = POWERUP_COLORS[powerUpName] || [255, 255, 255]; fill(displayColor); stroke(0); strokeWeight(2); text(`${powerUpName}: ${remainingTime}s`, x, y); let barWidth = 100; let barHeight = 8; let currentWidth = map(plane.powerUpTimer, 0, POWERUP_DURATION_FRAMES, 0, barWidth); noStroke(); fill(100); rect(x + barWidth / 2, y + barHeight, barWidth, barHeight); fill(displayColor); rect(x + currentWidth / 2, y + barHeight, currentWidth, barHeight); pop(); noStroke(); }
 
@@ -458,6 +534,40 @@ function updateWeatherVisuals() {
         console.log("Weather: Clearing up");
     }
     // Could also adjust cloud color/alpha here if desired
+}
+
+// --- NEW: Helper function to destroy the hut ---
+function destroyHut(hutObj) {
+    if (!hutObj || hutObj.destroyed) return; // Already destroyed or doesn't exist
+
+    console.log("Hut DESTROYED!");
+    hutObj.destroyed = true;
+    hutObj.rubbleDetails = []; // Initialize the array
+
+    // Create the particle explosion effect
+    createExplosion(hutObj.x, hutObj.y, HUT_DESTRUCTION_PARTICLES, BOMB_EXPLOSION_COLORS.concat(HUT_RUBBLE_COLORS), true); // Use bomb colors + rubble
+
+    // Generate static rubble details
+    for (let i = 0; i < HUT_RUBBLE_PIECES; i++) {
+        let rubbleCol = random(HUT_RUBBLE_COLORS);
+        // Positions relative to the hut's center (will be drawn with translation)
+        // Y position needs to be adjusted so rubble sits near the ground level (relative to hut center)
+        let baseY = hutObj.h * 0.5; // Bottom edge relative to center
+        let rubbleX = random(-hutObj.w * 0.6, hutObj.w * 0.6);
+        let rubbleY = baseY - random(0, hutObj.h * 0.6); // Place rubble starting from bottom upwards
+        let rubbleW = random(hutObj.w * 0.1, hutObj.w * 0.35);
+        let rubbleH = random(hutObj.h * 0.1, hutObj.h * 0.3);
+        let rubbleR = random(1, 3); // Corner radius
+
+        hutObj.rubbleDetails.push({
+            x: rubbleX,
+            y: rubbleY, // Store Y relative to hut center
+            w: rubbleW,
+            h: rubbleH,
+            r: rubbleR,
+            color: rubbleCol
+        });
+    }
 }
 
 
@@ -684,7 +794,7 @@ class Plane {
         // --- Collisions & Sound (if still alive after potential crash landing) ---
         if (!this.isAlive) return; // Double check after landing/crash check
 
-        // Hut Collision
+        // Hut Collision - Pass the hut object
         if (this.checkCollisionHut(hut)) return; // hit() called inside checkCollisionHut
 
         // Balloon Collision
@@ -747,31 +857,93 @@ class Plane {
         else if (this.activePowerUp === 'Bomb') { currentCooldown = SHOOT_COOLDOWN_FRAMES * 2.0; }
 
         if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
-            let originOffsetDistance = (this.activePowerUp === 'Bomb') ? -this.size * 0.3 : this.size * 0.9;
-            let originOffsetVector = createVector(originOffsetDistance, 0);
-            let rotatedOffset = originOffsetVector.copy().rotate(this.angle);
-            let spawnPos = p5.Vector.add(this.position, rotatedOffset);
 
             if (this.activePowerUp === 'Bomb') {
-                let newBomb = new Bomb(spawnPos.x, spawnPos.y, this.id, this.velocity);
+                // Drop Bomb
+                let originOffsetDistanceBomb = -this.size * 0.3; // Bomb drops from below/behind
+                let originOffsetVectorBomb = createVector(originOffsetDistanceBomb, 0);
+                let rotatedOffsetBomb = originOffsetVectorBomb.copy().rotate(this.angle);
+                let spawnPosBomb = p5.Vector.add(this.position, rotatedOffsetBomb);
+                let newBomb = new Bomb(spawnPosBomb.x, spawnPosBomb.y, this.id, this.velocity);
                 bombs.push(newBomb);
-                 if (bombDropSound && audioStarted && soundNodesStarted) { bombDropSound.play(shootNoise); }
+
+                // ALSO Shoot a Bullet
+                let originOffsetDistanceBullet = this.size * 0.9; // Bullet from the front
+                let originOffsetVectorBullet = createVector(originOffsetDistanceBullet, 0);
+                let rotatedOffsetBullet = originOffsetVectorBullet.copy().rotate(this.angle);
+                let spawnPosBullet = p5.Vector.add(this.position, rotatedOffsetBullet);
+                let bulletAngle = this.angle;
+                let newBullet = new Bullet(spawnPosBullet.x, spawnPosBullet.y, bulletAngle, this.id, this.bodyColor);
+                bullets.push(newBullet);
+
+                if (bombDropSound && audioStarted && soundNodesStarted) { bombDropSound.play(shootNoise); } // Only play bomb drop sound
+
             } else if (this.activePowerUp === 'TripleShot') {
+                // Fire Triple Bullets
+                let originOffsetDistance = this.size * 0.9; // Bullets from front
+                let originOffsetVector = createVector(originOffsetDistance, 0);
+                let rotatedOffset = originOffsetVector.copy().rotate(this.angle);
+                let spawnPos = p5.Vector.add(this.position, rotatedOffset);
+
                 let baseAngle = this.angle; let angle1 = baseAngle - TRIPLE_SHOT_SPREAD_ANGLE; let angle2 = baseAngle; let angle3 = baseAngle + TRIPLE_SHOT_SPREAD_ANGLE;
                 bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle1, this.id, this.bodyColor));
                 bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle2, this.id, this.bodyColor));
                 bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle3, this.id, this.bodyColor));
                 shootSoundEnv.play(shootNoise);
+
             } else {
-                 let bulletAngle = this.angle; let newBullet = new Bullet(spawnPos.x, spawnPos.y, bulletAngle, this.id, this.bodyColor);
+                // Fire Single Bullet (RapidFire handled by lower cooldown)
+                 let originOffsetDistance = this.size * 0.9; // Bullet from front
+                 let originOffsetVector = createVector(originOffsetDistance, 0);
+                 let rotatedOffset = originOffsetVector.copy().rotate(this.angle);
+                 let spawnPos = p5.Vector.add(this.position, rotatedOffset);
+
+                 let bulletAngle = this.angle;
+                 let newBullet = new Bullet(spawnPos.x, spawnPos.y, bulletAngle, this.id, this.bodyColor);
                  bullets.push(newBullet);
                  shootSoundEnv.play(shootNoise);
             }
-            this.shootCooldown = currentCooldown;
+            this.shootCooldown = currentCooldown; // Set cooldown after firing
         }
     }
 
-    checkCollisionHut(hutRect) { if (!this.isAlive || this.respawnTimer > 0) return false; if (this.activePowerUp === 'Shield') return false; let s = this.size; let halfW = s * 1.2; let halfH = s * 0.75; let cornersLocal = [ createVector(-halfW, -halfH), createVector( halfW, -halfH), createVector( halfW,  halfH), createVector(-halfW,  halfH) ]; let cornersWorld = cornersLocal.map(p => { let rotatedP = p.copy().rotate(this.angle); return p5.Vector.add(this.position, rotatedP); }); let minX = min(cornersWorld.map(p => p.x)); let maxX = max(cornersWorld.map(p => p.x)); let minY = min(cornersWorld.map(p => p.y)); let maxY = max(cornersWorld.map(p => p.y)); let hutMinX = hutRect.x - hutRect.w / 2; let hutMaxX = hutRect.x + hutRect.w / 2; let hutMinY = hutRect.y - hutRect.h / 2; let hutMaxY = hutRect.y + hutRect.h / 2; if (maxX > hutMinX && minX < hutMaxX && maxY > hutMinY && minY < hutMaxY) { console.log(`Plane ${this.id} hit hut!`); this.hit(true); return true; } return false; }
+
+    checkCollisionHut(hutObj) {
+        // Pass the actual hut object
+        if (!this.isAlive || this.respawnTimer > 0 || !hutObj || hutObj.destroyed) return false; // Check if hut is destroyed
+        if (this.activePowerUp === 'Shield') return false;
+
+        // Simple AABB check first (faster rejection)
+        let s = this.size; let halfW = s * 1.2; let halfH = s * 0.75;
+        let planeMinX = this.position.x - max(halfW, halfH); // Rough bounding box
+        let planeMaxX = this.position.x + max(halfW, halfH);
+        let planeMinY = this.position.y - max(halfW, halfH);
+        let planeMaxY = this.position.y + max(halfW, halfH);
+
+        let hutMinX = hutObj.x - hutObj.w / 2;
+        let hutMaxX = hutObj.x + hutObj.w / 2;
+        let hutMinY = hutObj.y - hutObj.h / 2;
+        let hutMaxY = hutObj.y + hutObj.h / 2;
+
+        if (planeMaxX < hutMinX || planeMinX > hutMaxX || planeMaxY < hutMinY || planeMinY > hutMaxY) {
+            return false; // No collision based on rough bounding boxes
+        }
+
+        // More precise check (optional, but better if needed)
+        // Could use Separating Axis Theorem or point-in-rectangle check with rotated plane points
+        // For simplicity, let's stick with a slightly generous bounding box check for now
+        // Re-evaluate if collisions feel too inaccurate
+
+        let collisionOccurred = (planeMaxX > hutMinX && planeMinX < hutMaxX && planeMaxY > hutMinY && planeMinY < hutMaxY);
+
+        if (collisionOccurred) {
+            console.log(`Plane ${this.id} hit hut!`);
+            this.hit(true); // Hit caused by crash
+            return true;
+        }
+        return false;
+    }
+
 
     hit(causedByCrashOrBomb, bullet = null) {
         if (!this.isAlive) return false;
@@ -787,8 +959,8 @@ class Plane {
         createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
         if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0);
         if (causedByCrashOrBomb && bullet === null) {
-             if (this.id === 1) { score2++; console.log("Crash/Bomb! Point for Player 2!"); }
-             else { score1++; console.log("Crash/Bomb! Point for Player 1!"); }
+             if (this.id === 1) { score2++; console.log("Crash/Bomb/Hut! Point for Player 2!"); }
+             else { score1++; console.log("Crash/Bomb/Hut! Point for Player 1!"); }
         }
         return true;
     }
@@ -800,7 +972,13 @@ class Plane {
 // ======================
 // --- Bullet Class ---
 // ======================
-class Bullet { constructor(x, y, angle, ownerId, planeColor) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED); this.ownerId = ownerId; this.size = 8; this.life = 150; this.planeColor = planeColor; this.coreColor = color(BULLET_CORE_BRIGHTNESS); this.trailColor = color(red(planeColor), green(planeColor), blue(planeColor), BULLET_TRAIL_ALPHA); } update() { this.position.add(this.velocity); this.life--; } display() { push(); translate(this.position.x, this.position.y); rotate(degrees(this.velocity.heading())); strokeWeight(2.5); stroke(this.trailColor); line(-this.size * 0.6, 0, this.size * 0.4, 0); strokeWeight(1.5); stroke(this.coreColor); line(-this.size * 0.4, 0, this.size * 0.2, 0); pop(); noStroke(); } isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size); } checkCollision(plane) { if (plane.id === this.ownerId || !plane.isAlive || plane.respawnTimer > 0) { return false; } let collisionRadius = plane.size * 0.8; let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < (collisionRadius + this.size / 2); } checkCollisionHut(hutRect) { return (this.position.x > hutRect.x - hutRect.w / 2 && this.position.x < hutRect.x + hutRect.w / 2 && this.position.y > hutRect.y - hutRect.h / 2 && this.position.y < hutRect.y + hutRect.h / 2); } }
+class Bullet { constructor(x, y, angle, ownerId, planeColor) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED); this.ownerId = ownerId; this.size = 8; this.life = 150; this.planeColor = planeColor; this.coreColor = color(BULLET_CORE_BRIGHTNESS); this.trailColor = color(red(planeColor), green(planeColor), blue(planeColor), BULLET_TRAIL_ALPHA); } update() { this.position.add(this.velocity); this.life--; } display() { push(); translate(this.position.x, this.position.y); rotate(degrees(this.velocity.heading())); strokeWeight(2.5); stroke(this.trailColor); line(-this.size * 0.6, 0, this.size * 0.4, 0); strokeWeight(1.5); stroke(this.coreColor); line(-this.size * 0.4, 0, this.size * 0.2, 0); pop(); noStroke(); } isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size); } checkCollision(plane) { if (plane.id === this.ownerId || !plane.isAlive || plane.respawnTimer > 0) { return false; } let collisionRadius = plane.size * 0.8; let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < (collisionRadius + this.size / 2); }
+    // Updated checkCollisionHut to accept the hut object
+    checkCollisionHut(hutObj) {
+        if (!hutObj || hutObj.destroyed) return false; // Check if hut exists and is not destroyed
+        return (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2);
+    }
+}
 
 // =====================
 // --- Cloud Class ---
@@ -869,18 +1047,49 @@ class Bomb {
     }
     update() { this.position.add(this.velocity); this.velocity.y += GRAVITY_FORCE * 1.5; this.velocity.mult(0.985); this.fuseTimer--; this.rotation += this.rotationSpeed; }
     display() { push(); translate(this.position.x, this.position.y); rotate(this.rotation); fill(50); stroke(80); strokeWeight(1); ellipse(0, 0, this.size * 1.2, this.size); fill(90); noStroke(); triangle(-this.size * 0.6, 0, -this.size * 0.9, -this.size * 0.3, -this.size * 0.9, this.size * 0.3); if (floor(this.fuseTimer / max(5, this.fuseTimer * 0.2)) % 2 === 0) { fill(255, 50 + (BOMB_FUSE_FRAMES - this.fuseTimer)*2, 0); ellipse(this.size * 0.5, 0, 4, 4); } pop(); noStroke(); }
-    explode() {
+
+    explode(hutObj) { // Accept hut object
         console.log("Bomb Exploded!");
-        createExplosion(this.position.x, this.position.y, BOMB_EXPLOSION_PARTICLES, BOMB_EXPLOSION_COLORS, true);
+        createExplosion(this.position.x, this.position.y, BOMB_EXPLOSION_PARTICLES, BOMB_EXPLOSION_COLORS, true); // Base explosion
+
+        // Plane Collision Check
         let p1Dist = dist(this.position.x, this.position.y, plane1.position.x, plane1.position.y);
         let p2Dist = dist(this.position.x, this.position.y, plane2.position.x, plane2.position.y);
-        if (plane1.isAlive && p1Dist < BOMB_EXPLOSION_RADIUS + plane1.size * 0.5) { console.log("Bomb hit Plane 1!"); let hitSuccess = plane1.hit(true); if (hitSuccess && this.ownerId !== plane1.id) { score2++; console.log("Bomb! Point P2");} }
-        if (plane2.isAlive && p2Dist < BOMB_EXPLOSION_RADIUS + plane2.size * 0.5) { console.log("Bomb hit Plane 2!"); let hitSuccess = plane2.hit(true); if (hitSuccess && this.ownerId !== plane2.id) { score1++; console.log("Bomb! Point P1"); } }
-        let hutDistX = abs(this.position.x - hut.x); let hutDistY = abs(this.position.y - hut.y);
-        if (hutDistX < BOMB_EXPLOSION_RADIUS + hut.w / 2 && hutDistY < BOMB_EXPLOSION_RADIUS + hut.h / 2) { console.log("Bomb damaged hut!"); createExplosion(this.position.x, this.position.y, 15, HUT_WALL.concat(HUT_ROOF)); }
+        if (plane1.isAlive && p1Dist < BOMB_EXPLOSION_RADIUS + plane1.size * 0.5) {
+            console.log("Bomb hit Plane 1!");
+            let hitSuccess = plane1.hit(true); // Hit caused by Bomb
+            if (hitSuccess && this.ownerId !== plane1.id) { score2++; console.log("Bomb! Point P2");}
+        }
+        if (plane2.isAlive && p2Dist < BOMB_EXPLOSION_RADIUS + plane2.size * 0.5) {
+            console.log("Bomb hit Plane 2!");
+            let hitSuccess = plane2.hit(true); // Hit caused by Bomb
+            if (hitSuccess && this.ownerId !== plane2.id) { score1++; console.log("Bomb! Point P1"); }
+        }
+
+        // Hut Destruction/Damage Check
+        if (hutObj) { // Make sure hut object exists
+             let hutDist = dist(this.position.x, this.position.y, hutObj.x, hutObj.y);
+             let collisionThresholdHut = BOMB_EXPLOSION_RADIUS + max(hutObj.w, hutObj.h) * 0.5; // Collision radius check
+
+             if (!hutObj.destroyed && hutDist < collisionThresholdHut) {
+                 // Destroy the hut - call the helper function
+                 destroyHut(hutObj);
+             } else if (hutObj.destroyed && hutDist < collisionThresholdHut) {
+                 // Optional: Smaller effect if bomb hits existing rubble
+                 // console.log("Bomb hit hut rubble!");
+                 createExplosion(this.position.x, this.position.y, 10, HUT_RUBBLE_COLORS, true);
+             }
+        }
     }
+
      checkCollision(plane) { if (!plane.isAlive || plane.respawnTimer > 0) return false; let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < plane.size * 0.7 + this.size / 2; }
-     checkCollisionHut(hutRect) { return (this.position.x > hutRect.x - hutRect.w / 2 && this.position.x < hutRect.x + hutRect.w / 2 && this.position.y > hutRect.y - hutRect.h / 2 && this.position.y < hutRect.y + hutRect.h / 2); }
+
+     // Updated checkCollisionHut to accept the hut object
+     checkCollisionHut(hutObj) {
+        if (!hutObj || hutObj.destroyed) return false; // Check if hut exists and is not destroyed
+        return (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2);
+     }
+
      checkCollisionGround() { return this.position.y >= GROUND_Y - this.size / 2; }
     isOffscreen() { return (this.fuseTimer < -300 && (this.position.y > height + this.size * 5 || this.position.x < -width || this.position.x > width*2)); }
 }
