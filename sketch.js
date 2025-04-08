@@ -74,7 +74,7 @@ const CHICKEN_SPEED = 5;
 const CHICKEN_BOUNCE_FACTOR = 0.7;
 const CHICKEN_DAMAGE = 0;
 const BUBBLE_SPEED = 2.5;
-const BUBBLE_TRAP_DURATION = 90;
+const BUBBLE_TRAP_DURATION = 180;
 const BUBBLE_FLOAT_FORCE = 0.15;
 const RAINBOW_TRAIL_PARTICLE_INTERVAL = 2;
 const RAINBOW_TRAIL_PARTICLE_LIFESPAN = 60;
@@ -593,38 +593,58 @@ class Plane {
         let canShoot = (!this.isOnGround || (this.isOnGround && isAngledForShootingOnGround)) && !this.isBubbled;
 
         let currentCooldown = SHOOT_COOLDOWN_FRAMES;
-        // Check for specific powerups affecting cooldown
         if (this.activePowerUps['RapidFire']) { currentCooldown = SHOOT_COOLDOWN_FRAMES / 2.5; }
         else if (this.activePowerUps['TripleShot']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.5; }
         else if (this.activePowerUps['Bomb']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 2.0; }
         else if (this.activePowerUps['ChickenLauncher']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.2; }
         else if (this.activePowerUps['BubbleGun']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.8; }
-        // ReverseGun doesn't change cooldown itself
+        // ReverseGun doesn't change cooldown itself but fires extra shot
 
         if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
-            let originOffsetDistance = this.size * 0.9; // Use fixed size
-            let spawnAngle = this.angle; let spawnOffsetVector = createVector(originOffsetDistance, 0);
-            if (this.activePowerUps['ReverseGun']) { spawnAngle += 180; spawnOffsetVector = createVector(-this.size * 0.9, 0); } // Adjust spawn for reverse
-            let rotatedOffset = spawnOffsetVector.copy().rotate(this.angle); let spawnPos = p5.Vector.add(this.position, rotatedOffset);
+            let originOffsetDistance = this.size * 0.9;
+            let primarySpawnAngle = this.angle; // Default forward
+            let primaryOffsetVector = createVector(originOffsetDistance, 0);
+            let hasReverseGun = this.activePowerUps['ReverseGun'];
 
+            // --- Determine primary shooting direction ---
+            if (hasReverseGun) {
+                primarySpawnAngle += 180; // Primary shot is backward
+                primaryOffsetVector = createVector(-originOffsetDistance, 0); // Offset backward
+            }
+            let primaryRotatedOffset = primaryOffsetVector.copy().rotate(this.angle);
+            let primarySpawnPos = p5.Vector.add(this.position, primaryRotatedOffset);
+
+            // --- Fire primary projectile(s) ---
             let fired = false;
-            // Determine projectile based on active powerups (priority?) Bomb > Triple > Wacky > Normal
             if (this.activePowerUps['Bomb']) {
+                // Bomb always drops slightly behind, regardless of ReverseGun
                 let bombOffsetDist = -this.size * 0.3; let bombOffsetVec = createVector(bombOffsetDist, 0).rotate(this.angle); let bombSpawnPos = p5.Vector.add(this.position, bombOffsetVec);
                 bombs.push(new Bomb(bombSpawnPos.x, bombSpawnPos.y, this.id, this.velocity)); if (bombDropSound && shootNoise) { bombDropSound.play(shootNoise); }
-                // Also fire bullet (forward/reverse based on ReverseGun)
-                bullets.push(new Bullet(spawnPos.x, spawnPos.y, spawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
+                // Also fire primary bullet (forward/reverse based on ReverseGun)
+                bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             } else if (this.activePowerUps['TripleShot']) {
-                let angle1 = spawnAngle - TRIPLE_SHOT_SPREAD_ANGLE; let angle2 = spawnAngle; let angle3 = spawnAngle + TRIPLE_SHOT_SPREAD_ANGLE;
-                bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle1, this.id, this.bodyColor)); bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle2, this.id, this.bodyColor)); bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle3, this.id, this.bodyColor));
+                let angle1 = primarySpawnAngle - TRIPLE_SHOT_SPREAD_ANGLE; let angle2 = primarySpawnAngle; let angle3 = primarySpawnAngle + TRIPLE_SHOT_SPREAD_ANGLE;
+                bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, angle1, this.id, this.bodyColor)); bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, angle2, this.id, this.bodyColor)); bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, angle3, this.id, this.bodyColor));
                  if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             } else if (this.activePowerUps['ChickenLauncher']) {
-                 bullets.push(new ChickenProjectile(spawnPos.x, spawnPos.y, spawnAngle, this.id)); if (chickenSound && chickenEnv) { chickenSound.freq(random(700,1000)); chickenEnv.play(chickenSound); } fired = true;
+                 bullets.push(new ChickenProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (chickenSound && chickenEnv) { chickenSound.freq(random(700,1000)); chickenEnv.play(chickenSound); } fired = true;
             } else if (this.activePowerUps['BubbleGun']) {
-                 bullets.push(new BubbleProjectile(spawnPos.x, spawnPos.y, spawnAngle, this.id)); if (shootSoundEnv && shootNoise) { /* Modify sound? */ shootSoundEnv.play(shootNoise); } fired = true;
-            } else { // Normal bullet (RapidFire handled by cooldown, ReverseGun by spawnAngle)
-                 bullets.push(new Bullet(spawnPos.x, spawnPos.y, spawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
+                 bullets.push(new BubbleProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (shootSoundEnv && shootNoise) { /* Modify sound? */ shootSoundEnv.play(shootNoise); } fired = true;
+            } else { // Normal bullet (RapidFire handled by cooldown, ReverseGun by primarySpawnAngle)
+                 bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             }
+
+            // --- Fire EXTRA forward bullet if ReverseGun is active ---
+            if (hasReverseGun) {
+                 let forwardSpawnAngle = this.angle; // Standard forward angle
+                 let forwardOffsetVector = createVector(originOffsetDistance, 0); // Standard forward offset
+                 let forwardRotatedOffset = forwardOffsetVector.copy().rotate(this.angle);
+                 let forwardSpawnPos = p5.Vector.add(this.position, forwardRotatedOffset);
+                 bullets.push(new Bullet(forwardSpawnPos.x, forwardSpawnPos.y, forwardSpawnAngle, this.id, this.bodyColor));
+                 // Play sound again? Or just rely on the primary sound? Rely on primary.
+                 fired = true; // Ensure cooldown applies even if only extra shot fired (shouldn't happen)
+            }
+
             if (fired) { this.shootCooldown = currentCooldown; }
         }
     }
@@ -745,7 +765,23 @@ class ChickenProjectile { // Unchanged from previous version as size was fixed
         let radiiSq = (targetRadius + this.size / 2)**2;
         return distanceSq < radiiSq;
     }
-    hitEffect(plane) { let pushVector = p5.Vector.sub(plane.position, this.position).normalize().mult(0.5); plane.velocity.add(pushVector); if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(900,1200)); chickenEnv.play(chickenSound); } }
+    
+    // Lethal Chicken Hit Effect
+    hitEffect(plane) {
+        // console.log(`Plane ${plane.id} fatally hit by chicken!`);
+        // Optional: Apply small impulse for visual effect before hit registers
+        // let pushVector = p5.Vector.sub(plane.position, this.position).normalize().mult(0.2);
+        // plane.velocity.add(pushVector);
+
+        if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) {
+            chickenSound.freq(random(900,1200)); // Squawk on hit
+            chickenEnv.play(chickenSound);
+        }
+        // Call plane.hit like a normal bullet
+        plane.hit(false, this); // false = not crash, pass chicken projectile info
+    }
+
+    
     checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; let hit = (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2); if(hit) { this.velocity.mult(-0.5); if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(500,800)); chickenEnv.play(chickenSound); } } return false; }
 }
 
