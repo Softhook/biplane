@@ -4,8 +4,8 @@
 const GRAVITY_FORCE = 0.1;
 const THRUST_FORCE = 0.16;
 const LIFT_FACTOR = 0.012;
-const TURN_SPEED = 2.5;
-const DAMPING_FACTOR = 0.985;
+const TURN_SPEED = 2.5; // Base turn speed
+const DAMPING_FACTOR = 0.985; // Base air drag
 const GROUND_FRICTION = 0.95;
 const BULLET_SPEED = 10;
 const SHOOT_COOLDOWN_FRAMES = 18; // Base cooldown
@@ -14,15 +14,16 @@ const BALLOON_RESPAWN_FRAMES = 360;
 const MAX_CLOUDS = 5;
 const CLOUD_BASE_SPEED = 0.3;
 const MIN_TAKEOFF_SPEED = 1.8;
-const MAX_LANDING_SPEED = 2.5;
-const MAX_PARTICLES = 150;
-const PLANE_COLLISION_THRESHOLD_FACTOR = 0.8;
+const MAX_LANDING_SPEED = 2.5; // Speed above which crash might occur (unless Trampoline)
+const MAX_PARTICLES = 250;
+const PLANE_COLLISION_THRESHOLD_FACTOR = 0.8; // Multiplier for combined radii
 const STALL_ANGLE_THRESHOLD = -70;
 const STALL_RECOVERY_ANGLE = -50;
 const STALL_EFFECT_FACTOR = 0.2;
 const MAX_SPEED_FOR_SOUND = 8;
 const PROPELLER_BLUR_COLOR = [100, 100, 100, 150];
 const PROPELLER_STOPPED_COLOR = [0];
+const PLANE_BASE_SIZE = 22; // Define fixed plane size
 
 // --- Weather Configuration ---
 let isCurrentlyRaining = false; // Start clear
@@ -36,27 +37,49 @@ const CLEAR_DURATION_MAX = 60 * 70;
 let rainTimer = 0;
 let clearTimer = 0;
 
-
 // --- Power-up Configuration ---
-const POWERUP_DURATION_FRAMES = 1200;
+const POWERUP_DURATION_FRAMES = 60 * 30; // 30 Seconds
 const POWERUP_FALL_SPEED = 0.5;
 const POWERUP_SIZE = 30;
-const POWERUP_TYPES = ['RapidFire', 'SpeedBoost', 'Shield', 'TripleShot', 'Bomb'];
+// REMOVED ShrinkRay, GrowRay
+const POWERUP_TYPES = [
+    'RapidFire', 'SpeedBoost', 'Shield', 'TripleShot', 'Bomb',
+    'Trampoline', 'ChickenLauncher', 'BubbleGun', 'ReverseGun', 'RainbowTrail'
+];
 const POWERUP_COLORS = {
     RapidFire: [255, 255, 0],   // Yellow
     SpeedBoost: [0, 255, 255],  // Cyan
     Shield: [200, 0, 255],      // Magenta
     TripleShot: [255, 255, 255], // White
-    Bomb: [80, 80, 80]          // Dark Gray
+    Bomb: [80, 80, 80],          // Dark Gray
+    Trampoline: [0, 255, 0],      // Green
+    ChickenLauncher: [255, 200, 150], // Peach
+    BubbleGun: [150, 180, 255],   // Light Sky Blue
+    ReverseGun: [255, 165, 0],    // Orange
+    RainbowTrail: [255, 0, 255]     // Temp Magenta (trail is rainbow)
 };
 const SHIELD_COLOR = [150, 150, 255, 100];
 const TRIPLE_SHOT_SPREAD_ANGLE = 6;
 const BOMB_DROP_VELOCITY_Y = 1.5;
 const BOMB_FUSE_FRAMES = 90;
-const BOMB_EXPLOSION_RADIUS = 70; // Increased radius slightly for hut
+const BOMB_EXPLOSION_RADIUS = 70;
 const BOMB_EXPLOSION_PARTICLES = 45;
-const HUT_DESTRUCTION_PARTICLES = 70; // More particles for hut destruction
-const HUT_RUBBLE_PIECES = 25; // Number of static rubble pieces to draw
+const HUT_DESTRUCTION_PARTICLES = 70;
+const HUT_RUBBLE_PIECES = 25;
+
+// --- WACKY POWERUP CONFIG ---
+const TRAMPOLINE_BOUNCE_FORCE = 2.0;
+const TRAMPOLINE_MAX_SPEED_THRESHOLD = 2.8; // Bounce happens below this speed
+const CHICKEN_SPEED = 5;
+const CHICKEN_BOUNCE_FACTOR = 0.7;
+const CHICKEN_DAMAGE = 0;
+const BUBBLE_SPEED = 2.5;
+const BUBBLE_TRAP_DURATION = 90;
+const BUBBLE_FLOAT_FORCE = 0.15;
+const RAINBOW_TRAIL_PARTICLE_INTERVAL = 2;
+const RAINBOW_TRAIL_PARTICLE_LIFESPAN = 60;
+const RAINBOW_COLORS = [ [255, 0, 0], [255, 165, 0], [255, 255, 0], [0, 255, 0], [0, 0, 255], [75, 0, 130], [148, 0, 211] ];
+let rainbowColorIndex = 0;
 
 // --- Sound Parameters ---
 const BASE_ENGINE_FREQ = 40;
@@ -72,7 +95,7 @@ const CONTROLS_P2 = { thrust: 38, left: 37, right: 39, shoot: 40 }; // Arrows
 let plane1, plane2;
 let bullets = [];
 let clouds = [];
-let hut; // Will be an object { x, y, w, h, destroyed, rubbleDetails: [] }
+let hut;
 let balloon;
 let score1 = 0;
 let score2 = 0;
@@ -89,6 +112,8 @@ let shootSoundEnv, shootNoise;
 let explosionSoundEnv, explosionNoise;
 let powerUpSpawnSound, powerUpCollectSound, shieldDeflectSound;
 let bombDropSound, bombExplosionSoundEnv, bombExplosionNoise;
+let boingSound, chickenSound, bubblePopSound, rainbowSparkleSound;
+let boingEnv, chickenEnv, bubbleEnv, rainbowEnv;
 let audioStarted = false;
 let soundNodesStarted = false;
 
@@ -102,8 +127,8 @@ const HUT_WIDTH = 75;
 const HUT_HEIGHT = 55;
 let hutX, hutY;
 
-// --- Colors ---
-const SKY_TOP = [5, 3, 15];          // Define the base colors first
+// --- Colors --- (Removed Shrink/Grow Ray colors)
+const SKY_TOP = [5, 3, 15];
 const SKY_UPPER_BAND = [65, 35, 20];
 const SKY_MID_BLUE = [25, 45, 110];
 const SKY_LOWER_BLUE = [70, 120, 200];
@@ -117,8 +142,8 @@ const SNOW_COLOR = [240, 245, 250];
 const HUT_WALL = [150, 120, 90];
 const HUT_ROOF = [80, 55, 35];
 const HUT_DOOR = [60, 40, 30];
-const HUT_RUBBLE_COLORS = [ [100, 80, 60], [70, 50, 30], [60, 40, 30], [120, 100, 80], [140, 110, 85], [85, 65, 45] ]; // Colors for destroyed hut particles/drawing
-const CLOUD_COLOR = [200, 200, 215]; // Slightly grayer clouds in rain
+const HUT_RUBBLE_COLORS = [ [100, 80, 60], [70, 50, 30], [60, 40, 30], [120, 100, 80], [140, 110, 85], [85, 65, 45] ];
+const CLOUD_COLOR = [200, 200, 215];
 const CLOUD_SHADOW = [160, 160, 180, 180];
 const PLANE1_COLOR_BODY = [200, 100, 30];
 const PLANE1_COLOR_WING = [230, 150, 70];
@@ -135,12 +160,15 @@ const BALLOON_COLORS = [ [230, 50, 50], [50, 150, 230], [240, 200, 60], [50, 200
 const BALLOON_BASKET = [160, 100, 40];
 const BALLOON_ROPE = [80, 60, 40];
 const RAINDROP_COLOR = [150, 180, 220, 150];
+const CHICKEN_BODY_COLOR = [245, 225, 180];
+const CHICKEN_ACCENT_COLOR = [255, 80, 80];
+const BUBBLE_FILL_COLOR = [180, 210, 255, 80];
+const BUBBLE_STROKE_COLOR = [220, 240, 255, 150];
 
 let currentSkyTop = [...SKY_TOP];
 let currentSkyUpperBand = [...SKY_UPPER_BAND];
 let currentSkyMidBlue = [...SKY_MID_BLUE];
 let currentSkyLowerBlue = [...SKY_LOWER_BLUE];
-
 
 // --- p5.js Setup Function ---
 function setup() {
@@ -150,20 +178,17 @@ function setup() {
     textAlign(CENTER, CENTER);
     noSmooth();
 
-    // Initialize Weather State (Start Clear)
     isCurrentlyRaining = false;
-    clearTimer = random(CLEAR_DURATION_MIN, CLEAR_DURATION_MAX); // Start with a clear period
+    clearTimer = random(CLEAR_DURATION_MIN, CLEAR_DURATION_MAX);
     rainTimer = 0;
-    rainDrops = []; // Start with no raindrops
+    rainDrops = [];
 
-    calculateLayout(); // Calls updateWeatherVisuals implicitly
+    calculateLayout();
 
-    // Initialize Planes
-    let planeStartY = GROUND_Y - 10;
+    let planeStartY = GROUND_Y - PLANE_BASE_SIZE * 0.8;
     plane1 = new Plane(width * 0.1, planeStartY, PLANE1_COLOR_BODY, PLANE1_COLOR_WING, PLANE1_COLOR_ACCENT, CONTROLS_P1, 1);
     plane2 = new Plane(width * 0.9, planeStartY, PLANE2_COLOR_BODY, PLANE2_COLOR_WING, PLANE2_COLOR_ACCENT, CONTROLS_P2, 2);
 
-    // Initialize Scenery
     clouds = []; for (let i = 0; i < MAX_CLOUDS; i++) { clouds.push(new Cloud()); }
     balloon = new Balloon(width * 0.75, height * 0.4);
     stars = []; for (let i = 0; i < 150; i++) { stars.push({ x: random(width), y: random(height * 0.7), size: random(1, 2.5), brightness: random(150, 255) }); }
@@ -173,20 +198,25 @@ function setup() {
     // --- Initialize Sounds ---
     engineSound1 = new p5.Oscillator('sawtooth'); engineSound1.freq(BASE_ENGINE_FREQ); engineSound1.amp(0);
     engineSound2 = new p5.Oscillator('sawtooth'); engineSound2.freq(BASE_ENGINE_FREQ); engineSound2.amp(0);
-
     shootNoise = new p5.Noise('white'); shootNoise.amp(0);
     shootSoundEnv = new p5.Envelope(); shootSoundEnv.setADSR(0.001, 0.02, 0, 0.04); shootSoundEnv.setRange(0.9, 0);
-
     explosionNoise = new p5.Noise('pink'); explosionNoise.amp(0);
     explosionSoundEnv = new p5.Envelope(); explosionSoundEnv.setADSR(0.03, 0.5, 0.1, 0.7); explosionSoundEnv.setRange(0.7, 0);
-
     powerUpSpawnSound = new p5.Envelope(); powerUpSpawnSound.setADSR(0.01, 0.1, 0.2, 0.2); powerUpSpawnSound.setRange(0.5, 0);
     powerUpCollectSound = new p5.Envelope(); powerUpCollectSound.setADSR(0.005, 0.05, 0.3, 0.1); powerUpCollectSound.setRange(0.8, 0);
     shieldDeflectSound = new p5.Envelope(); shieldDeflectSound.setADSR(0.001, 0.03, 0, 0.05); shieldDeflectSound.setRange(0.6, 0);
-
     bombDropSound = new p5.Envelope(); bombDropSound.setADSR(0.01, 0.1, 0, 0.1); bombDropSound.setRange(0.4, 0);
     bombExplosionNoise = new p5.Noise('brown'); bombExplosionNoise.amp(0);
     bombExplosionSoundEnv = new p5.Envelope(); bombExplosionSoundEnv.setADSR(0.05, 0.7, 0.2, 0.9); bombExplosionSoundEnv.setRange(0.9, 0);
+
+    boingSound = new p5.Oscillator('sine'); boingSound.amp(0); boingSound.freq(440);
+    boingEnv = new p5.Envelope(); boingEnv.setADSR(0.01, 0.2, 0, 0.1); boingEnv.setRange(0.7, 0);
+    chickenSound = new p5.Oscillator('square'); chickenSound.amp(0); chickenSound.freq(880);
+    chickenEnv = new p5.Envelope(); chickenEnv.setADSR(0.005, 0.05, 0, 0.05); chickenEnv.setRange(0.4, 0);
+    bubblePopSound = new p5.Noise('white'); bubblePopSound.amp(0);
+    bubbleEnv = new p5.Envelope(); bubbleEnv.setADSR(0.001, 0.03, 0, 0.04); bubbleEnv.setRange(0.6, 0);
+    rainbowSparkleSound = new p5.Oscillator('triangle'); rainbowSparkleSound.amp(0); rainbowSparkleSound.freq(1200);
+    rainbowEnv = new p5.Envelope(); rainbowEnv.setADSR(0.005, 0.1, 0, 0.1); rainbowEnv.setRange(0.3, 0);
 
     plane1.assignEngineSound(engineSound1);
     plane2.assignEngineSound(engineSound2);
@@ -197,930 +227,629 @@ function calculateLayout() {
     GROUND_Y = height * GROUND_LEVEL_Y_FRAC;
     hutX = width / 2;
     hutY = GROUND_Y - HUT_HEIGHT / 2;
-    // Initialize or update hut object
-    hut = {
-        x: hutX,
-        y: hutY,
-        w: HUT_WIDTH,
-        h: HUT_HEIGHT,
-        destroyed: hut ? hut.destroyed : false, // Preserve destroyed state on resize
-        rubbleDetails: hut ? hut.rubbleDetails : null // Preserve rubble details on resize
-    };
+    hut = { x: hutX, y: hutY, w: HUT_WIDTH, h: HUT_HEIGHT, destroyed: hut ? hut.destroyed : false, rubbleDetails: hut ? hut.rubbleDetails : null };
 
-    if (stars && stars.length > 0) {
-        for (let star of stars) {
-            star.x = random(width);
-            star.y = random(height * 0.7);
-        }
-    }
+    if (stars && stars.length > 0) { for (let star of stars) { star.x = random(width); star.y = random(height * 0.7); } }
+
+    let planeStartY = GROUND_Y - PLANE_BASE_SIZE * 0.8;
+
     if (gameState === 'intro') {
-        let planeStartY = GROUND_Y - 10;
         if (plane1) plane1.startPos = createVector(width * 0.1, planeStartY);
         if (plane2) plane2.startPos = createVector(width * 0.9, planeStartY);
-        if (hut) { // Reset hut on intro screen (e.g., after resize)
-            hut.destroyed = false;
-            hut.rubbleDetails = null;
-        }
+        if (hut) { hut.destroyed = false; hut.rubbleDetails = null; }
+    } else {
+        if (plane1) plane1.startPos.y = planeStartY;
+        if (plane2) plane2.startPos.y = planeStartY;
     }
-
-    // Update visuals based on current rain state (ensures correct colors after resize)
     updateWeatherVisuals();
 }
 
 // --- p5.js Draw Function (Main Game Loop) ---
 function draw() {
-    // --- Intro Screen Logic ---
-    if (gameState === 'intro') {
-        drawIntroScreen();
-        return;
+    if (gameState === 'intro') { drawIntroScreen(); return; }
+
+    // --- Weather ---
+    if (gameState === 'playing') {
+        if (isCurrentlyRaining) { rainTimer--; if (rainTimer <= 0) { isCurrentlyRaining = false; clearTimer = random(CLEAR_DURATION_MIN, CLEAR_DURATION_MAX); rainDrops = []; updateWeatherVisuals(); } }
+        else { clearTimer--; if (clearTimer <= 0) { isCurrentlyRaining = true; rainTimer = random(RAIN_DURATION_MIN, RAIN_DURATION_MAX); rainDrops = []; for (let i = 0; i < MAX_RAINDROPS; i++) { rainDrops.push(new RainDrop()); } updateWeatherVisuals(); } }
     }
 
-    // --- Weather Control Logic ---
-    if (gameState === 'playing') { // Only change weather during gameplay
-        if (isCurrentlyRaining) {
-            rainTimer--;
-            if (rainTimer <= 0) {
-                // Transition to Clear
-                isCurrentlyRaining = false;
-                clearTimer = random(CLEAR_DURATION_MIN, CLEAR_DURATION_MAX);
-                rainDrops = []; // Clear existing drops
-                updateWeatherVisuals();
-            }
-        } else { // Currently Clear
-            clearTimer--;
-            if (clearTimer <= 0) {
-                // Transition to Rain
-                isCurrentlyRaining = true;
-                rainTimer = random(RAIN_DURATION_MIN, RAIN_DURATION_MAX);
-                // Create new raindrops
-                rainDrops = []; // Clear just in case
-                for (let i = 0; i < MAX_RAINDROPS; i++) {
-                    rainDrops.push(new RainDrop());
-                }
-                updateWeatherVisuals();
-            }
-        }
-    }
-    // --- End Weather Control ---
-
-
-    // --- Playing State Logic ---
-    drawBackground(); // Uses potentially modified currentSky... colors
+    drawBackground();
     drawEnvironment();
 
-    // Update and Draw standard Particles (explosions etc.)
+    // --- Particles ---
     for (let i = particles.length - 1; i >= 0; i--) { particles[i].update(); particles[i].display(); if (particles[i].isDead()) { particles.splice(i, 1); } }
 
-    // Bullets
+    // --- Projectiles ---
     for (let i = bullets.length - 1; i >= 0; i--) {
-        bullets[i].update();
-        if (plane1.isAlive && bullets[i].checkCollision(plane1)) {
-            if (bullets[i].ownerId !== plane1.id) {
-                if (!plane1.hit(false, bullets[i])) { bullets.splice(i, 1); } continue;
-            }
-        }
-        if (plane2.isAlive && bullets[i].checkCollision(plane2)) {
-             if (bullets[i].ownerId !== plane2.id) {
-                 if (!plane2.hit(false, bullets[i])) { bullets.splice(i, 1); } continue;
-             }
-        }
-        if (balloon.isAlive && balloon.checkCollision(bullets[i])) {
-            balloon.hit();
-            if (bullets[i].ownerId === 1) { score1++; } else { score2++; }
-            bullets.splice(i, 1); continue;
-        }
-        // Pass the actual hut object to checkCollisionHut
-        if (bullets[i].checkCollisionHut(hut)) {
-             createExplosion(bullets[i].position.x, bullets[i].position.y, 5, HUT_WALL); bullets.splice(i, 1); continue;
-        } // Simpler hut hit effect color
-        if (bullets[i].isOffscreen()) { bullets.splice(i, 1); } else { bullets[i].display(); }
+        let proj = bullets[i];
+        proj.update();
+        let removeProjectile = false;
+        for (let plane of [plane1, plane2]) { if (proj.checkCollision(plane)) { proj.hitEffect(plane); removeProjectile = true; break; } }
+        if (removeProjectile) { bullets.splice(i, 1); continue; }
+        if (proj.checkCollision(balloon, true)) { balloon.hit(); removeProjectile = true; if (proj.ownerId === 1) { score1++; } else { score2++; } if (proj instanceof BubbleProjectile && bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) { bubbleEnv.play(bubblePopSound); } }
+        if (removeProjectile) { bullets.splice(i, 1); continue; }
+        if (proj.checkCollisionHut(hut)) { if (!(proj instanceof ChickenProjectile)) { removeProjectile = true; } }
+        if (removeProjectile) { bullets.splice(i, 1); continue; }
+        if (proj.isOffscreen()) { removeProjectile = true; }
+        if (removeProjectile) { bullets.splice(i, 1); continue; }
+        proj.display();
     }
 
-    // Bombs
+    // --- Bombs ---
     for (let i = bombs.length - 1; i >= 0; i--) {
-        bombs[i].update();
-        bombs[i].display();
-        // Bomb collisions (check after update) - Plane/Hut/Ground
-        let exploded = false;
-        if (bombs[i].fuseTimer <= 0) {
-             bombs[i].explode(hut); exploded = true; // Pass hut object to explode
-        } else {
-             if (plane1.isAlive && bombs[i].ownerId !== plane1.id && bombs[i].checkCollision(plane1)) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
-             else if (plane2.isAlive && bombs[i].ownerId !== plane2.id && bombs[i].checkCollision(plane2)) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
-             else if (bombs[i].checkCollisionHut(hut)) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
-             else if (bombs[i].checkCollisionGround()) { bombs[i].explode(hut); exploded = true; } // Pass hut object to explode
-        }
-
-        if (exploded || bombs[i].isOffscreen()) {
-            bombs.splice(i, 1);
-        }
+        bombs[i].update(); bombs[i].display(); let exploded = false;
+        if (bombs[i].fuseTimer <= 0) { bombs[i].explode(hut); exploded = true; }
+        else { if (plane1.isAlive && bombs[i].ownerId !== plane1.id && bombs[i].checkCollision(plane1)) { bombs[i].explode(hut); exploded = true; } else if (plane2.isAlive && bombs[i].ownerId !== plane2.id && bombs[i].checkCollision(plane2)) { bombs[i].explode(hut); exploded = true; } else if (bombs[i].checkCollisionHut(hut)) { bombs[i].explode(hut); exploded = true; } else if (bombs[i].checkCollisionGround()) { bombs[i].explode(hut); exploded = true; } }
+        if (exploded || bombs[i].isOffscreen()) { bombs.splice(i, 1); }
     }
 
-    // Planes
+    // --- Planes ---
     plane1.handleInput(keys); plane1.update(); plane1.display();
     plane2.handleInput(keys); plane2.update(); plane2.display();
 
-    // Plane-Plane Collision
-    if (plane1.isAlive && plane2.isAlive && plane1.activePowerUp !== 'Shield' && plane2.activePowerUp !== 'Shield') {
-        let distance = dist(plane1.position.x, plane1.position.y, plane2.position.x, plane2.position.y);
-        let collisionThreshold = (plane1.size + plane2.size) * PLANE_COLLISION_THRESHOLD_FACTOR;
-        if (distance < collisionThreshold) {
-            console.log("PLANE COLLISION!"); plane1.hit(true); plane2.hit(true);
-             let awayVector = p5.Vector.sub(plane1.position, plane2.position).normalize().mult(2); plane1.velocity.add(awayVector); plane2.velocity.sub(awayVector);
+    // --- Plane-Plane Collision ---
+    if (plane1.isAlive && plane2.isAlive && !plane1.activePowerUps['Shield'] && !plane2.activePowerUps['Shield']) {
+        let distanceSq = (plane1.position.x - plane2.position.x)**2 + (plane1.position.y - plane2.position.y)**2;
+        let collisionRadius = (plane1.size + plane2.size) * 0.5 * PLANE_COLLISION_THRESHOLD_FACTOR;
+        if (distanceSq < collisionRadius * collisionRadius) {
+            // console.log("PLANE COLLISION!");
+            plane1.hit(true); plane2.hit(true);
+            let awayVector = p5.Vector.sub(plane1.position, plane2.position).normalize().mult(2);
+            plane1.velocity.add(awayVector); plane2.velocity.sub(awayVector);
         }
     }
 
-    // Scenery
+    // --- Scenery & Environment ---
     for (let cloud of clouds) { cloud.update(); cloud.display(); }
     balloon.update(); balloon.display();
-    drawHut(); // Draws based on hut.destroyed and hut.rubbleDetails state
+    drawHut();
+    if (isCurrentlyRaining) { for (let drop of rainDrops) { drop.update(); drop.display(); } }
 
-    // --- MODIFIED: Update and Draw Raindrops (Conditional) ---
-    if (isCurrentlyRaining) {
-        for (let drop of rainDrops) {
-            drop.update();
-            drop.display();
-        }
-    }
-    // --- End Raindrop Drawing ---
-
-    // PowerUps
+    // --- PowerUps ---
     for (let i = powerUps.length - 1; i >= 0; i--) {
         powerUps[i].update(); powerUps[i].display();
-        if (plane1.isAlive && powerUps[i].checkCollision(plane1)) { plane1.collectPowerUp(powerUps[i].type); powerUps.splice(i, 1); continue; }
-        if (plane2.isAlive && powerUps[i].checkCollision(plane2)) { plane2.collectPowerUp(powerUps[i].type); powerUps.splice(i, 1); continue; }
+        if (powerUps[i].checkCollision(plane1)) { plane1.collectPowerUp(powerUps[i].type); powerUps.splice(i, 1); continue; }
+        if (powerUps[i].checkCollision(plane2)) { plane2.collectPowerUp(powerUps[i].type); powerUps.splice(i, 1); continue; }
         if (powerUps[i].isOffscreen()) { powerUps.splice(i, 1); }
     }
 
+    // --- UI ---
     drawUI();
-    displayPowerUpStatus(plane1, 20, height - 70);
-    displayPowerUpStatus(plane2, width - 220, height - 70);
+    displayPowerUpStatus(plane1, 20, height - 70, width * 0.4); // Display P1 powerups on left
+    displayPowerUpStatus(plane2, width - 20, height - 70, width * 0.4, true); // Display P2 powerups on right
 }
 
-// --- Draw Intro Screen ---
-function drawIntroScreen() {
-    // Use current (potentially darkened) sky colors for intro too
-    drawBackground();
-    drawEnvironment();
-    if (hut) { // Ensure hut is not destroyed on intro
-        hut.destroyed = false;
-        hut.rubbleDetails = null;
-    }
-    drawHut(); // Draw the intact hut on intro
-
-    fill(0, 0, 0, 150);
-    rect(width / 2, height / 2, width, height);
-    textFont('monospace'); fill(255, 215, 0); stroke(0); strokeWeight(4); textSize(min(width * 0.1, height * 0.15)); textAlign(CENTER, CENTER); text("Biplane Battle", width / 2, height * 0.2);
-    noStroke(); fill(240); textSize(min(width * 0.025, height * 0.04)); let instrY = height * 0.45; let lineSpacing = height * 0.05; let col1X = width * 0.3; let col2X = width * 0.7;
-    fill(PLANE1_COLOR_BODY); text("Player 1", col1X, instrY); fill(240); text("W: Thrust", col1X, instrY + lineSpacing); text("A: Turn Left", col1X, instrY + lineSpacing * 2); text("D: Turn Right", col1X, instrY + lineSpacing * 3); text("S: Shoot/Drop", col1X, instrY + lineSpacing * 4);
-    fill(PLANE2_COLOR_BODY); text("Player 2", col2X, instrY); fill(240); text("Up Arrow: Thrust", col2X, instrY + lineSpacing); text("Left Arrow: Turn Left", col2X, instrY + lineSpacing * 2); text("Right Arrow: Turn Right", col2X, instrY + lineSpacing * 3); text("Down Arrow: Shoot/Drop", col2X, instrY + lineSpacing * 4);
-    fill(255, 255, 100); textSize(min(width * 0.03, height * 0.05)); if (floor(frameCount / 20) % 2 === 0) { text("Press any key to start", width / 2, height * 0.85); } noStroke();
-}
-
+// --- Draw Intro Screen --- (Unchanged)
+function drawIntroScreen() { drawBackground(); drawEnvironment(); if (hut) { hut.destroyed = false; hut.rubbleDetails = null; } drawHut(); fill(0, 0, 0, 150); rect(width / 2, height / 2, width, height); textFont('monospace'); fill(255, 215, 0); stroke(0); strokeWeight(4); textSize(min(width * 0.1, height * 0.15)); textAlign(CENTER, CENTER); text("Biplane Battle", width / 2, height * 0.2); noStroke(); fill(240); textSize(min(width * 0.025, height * 0.04)); let instrY = height * 0.45; let lineSpacing = height * 0.05; let col1X = width * 0.3; let col2X = width * 0.7; fill(PLANE1_COLOR_BODY); text("Player 1", col1X, instrY); fill(240); text("W: Thrust", col1X, instrY + lineSpacing); text("A: Turn Left", col1X, instrY + lineSpacing * 2); text("D: Turn Right", col1X, instrY + lineSpacing * 3); text("S: Shoot/Drop", col1X, instrY + lineSpacing * 4); fill(PLANE2_COLOR_BODY); text("Player 2", col2X, instrY); fill(240); text("Up Arrow: Thrust", col2X, instrY + lineSpacing); text("Left Arrow: Turn Left", col2X, instrY + lineSpacing * 2); text("Right Arrow: Turn Right", col2X, instrY + lineSpacing * 3); text("Down Arrow: Shoot/Drop", col2X, instrY + lineSpacing * 4); fill(255, 255, 100); textSize(min(width * 0.03, height * 0.05)); if (floor(frameCount / 20) % 2 === 0) { text("Press any key to start", width / 2, height * 0.85); } noStroke(); }
 
 // --- Input Handling ---
 function keyPressed() {
     if (gameState === 'intro') {
-        gameState = 'playing';
-        if (hut) { // Ensure hut starts intact when game starts
-             hut.destroyed = false;
-             hut.rubbleDetails = null;
-        }
-        if (audioStarted && !soundNodesStarted) {
-            try {
-                 engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start();
-                 bombExplosionNoise.start();
-                 soundNodesStarted = true;
-                 console.log("Sound nodes started via key press after audio context was ready.");
-            } catch (e) { console.error("Error starting sound nodes on key press:", e); }
-        } else if (!audioStarted) { console.log("Key pressed to start game, but audio context not yet running (click the screen)."); }
-        return;
-    }
-    if (gameState === 'playing') { keys[keyCode] = true; }
+        gameState = 'playing'; if (hut) { hut.destroyed = false; hut.rubbleDetails = null; }
+        if (audioStarted && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started via key press."); */ } catch (e) { console.error("Error starting sound nodes:", e); } }
+        else if (!audioStarted) { /* console.log("Key pressed, waiting for audio context."); */ } return;
+    } if (gameState === 'playing') { keys[keyCode] = true; }
 }
 function keyReleased() { if (gameState === 'playing') { keys[keyCode] = false; } }
 
 // --- Fullscreen & Audio Start ---
 function mousePressed() {
-  if (!audioStarted && getAudioContext().state !== 'running') {
-     console.log("Attempting to start audio context...");
-     userStartAudio().then(() => {
-        if (getAudioContext().state === 'running') {
-            console.log("Audio Context is now running."); audioStarted = true;
-            if (gameState === 'playing' && !soundNodesStarted) {
-                 try {
-                    engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start();
-                    bombExplosionNoise.start();
-                    soundNodesStarted = true;
-                    console.log("Sound nodes started via mouse press because game was already playing.");
-                 } catch (e) { console.error("Error starting sound nodes on mouse press:", e); }
-            }
-        } else { console.error("Audio context failed to resume or start."); }
-     }).catch(e => { console.error("Error starting audio:", e); });
-  } else if (!audioStarted && getAudioContext().state === 'running') {
-      console.log("Audio Context was already running. Marking audio as started."); audioStarted = true;
-      if (gameState === 'playing' && !soundNodesStarted) {
-           try {
-               engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start();
-               bombExplosionNoise.start();
-               soundNodesStarted = true;
-               console.log("Sound nodes started via mouse press (audio context was already running).");
-           } catch (e) { console.error("Error starting sound nodes on mouse press (pre-existing context):", e); }
-      }
-  }
+  if (!audioStarted && getAudioContext().state !== 'running') { userStartAudio().then(() => { if (getAudioContext().state === 'running') { /* console.log("Audio Context running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (mouse press)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } } else { console.error("Audio context failed to resume."); } }).catch(e => { console.error("Error starting audio:", e); }); }
+  else if (!audioStarted && getAudioContext().state === 'running') { /* console.log("Audio Context already running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (pre-existing context)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } }
   if (mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) { let fs = fullscreen(); fullscreen(!fs); }
 }
 
 // --- Window Resize Handling ---
 function windowResized() { resizeCanvas(windowWidth, windowHeight); calculateLayout(); }
 
-
 // --- Drawing Functions ---
-function drawBackground() {
-    noStroke();
-    let bandHeight = height * 0.03;
-    fill(currentSkyTop); rect(width / 2, (height * 0.075) / 2, width, height * 0.075);
-    fill(currentSkyUpperBand); rect(width / 2, height * 0.075 + bandHeight / 2, width, bandHeight);
-    for (let y = height * 0.075 + bandHeight; y < GROUND_Y; y++) {
-        let inter = map(y, height * 0.075 + bandHeight, GROUND_Y, 0, 1);
-        let c = lerpColor(color(currentSkyMidBlue), color(currentSkyLowerBlue), inter);
-        stroke(c); line(0, y, width, y);
-    }
-    noStroke(); fill(255);
-    for (let star of stars) {
-        let brightness = star.brightness * (0.8 + sin(frameCount * 2 + star.x) * 0.2);
-        // Use isCurrentlyRaining here for alpha
-        fill(brightness, isCurrentlyRaining ? 80 : 255);
-        ellipse(star.x, star.y, star.size, star.size);
-    }
-    noStroke();
-}
-
+function drawBackground() { noStroke(); let bandHeight = height * 0.03; fill(currentSkyTop); rect(width / 2, (height * 0.075) / 2, width, height * 0.075); fill(currentSkyUpperBand); rect(width / 2, height * 0.075 + bandHeight / 2, width, bandHeight); for (let y = height * 0.075 + bandHeight; y < GROUND_Y; y++) { let inter = map(y, height * 0.075 + bandHeight, GROUND_Y, 0, 1); let c = lerpColor(color(currentSkyMidBlue), color(currentSkyLowerBlue), inter); stroke(c); line(0, y, width, y); } noStroke(); fill(255); for (let star of stars) { let brightness = star.brightness * (0.8 + sin(frameCount * 2 + star.x) * 0.2); fill(brightness, isCurrentlyRaining ? 80 : 255); ellipse(star.x, star.y, star.size, star.size); } noStroke(); }
 function drawEnvironment() { noStroke(); fill(MOUNTAIN_DISTANT); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y * 0.85); vertex(width * 0.3, GROUND_Y * 0.88); vertex(width * 0.5, GROUND_Y * 0.78); vertex(width * 0.7, GROUND_Y * 0.90); vertex(width * 0.9, GROUND_Y * 0.82); vertex(width, GROUND_Y); endShape(CLOSE); let peak1_baseL = { x: width * 0.05, y: GROUND_Y }; let peak1_top = { x: width * 0.3, y: GROUND_Y * 0.55 }; let peak1_baseR = { x: width * 0.45, y: GROUND_Y }; let peak2_baseL = { x: width * 0.4, y: GROUND_Y }; let peak2_top = { x: width * 0.65, y: GROUND_Y * 0.45 }; let peak2_baseR = { x: width * 0.9, y: GROUND_Y }; fill(MOUNTAIN_DARK); triangle(peak1_baseL.x, peak1_baseL.y, peak1_top.x, peak1_top.y, peak1_baseR.x, peak1_baseR.y); let snowLevel1 = 0.35; fill(SNOW_COLOR); beginShape(); vertex(peak1_top.x, peak1_top.y); let snowP1_L_x = lerp(peak1_top.x, peak1_baseL.x, snowLevel1 * 1.2); let snowP1_L_y = lerp(peak1_top.y, peak1_baseL.y, snowLevel1); vertex(snowP1_L_x, snowP1_L_y); let snowP1_R_x = lerp(peak1_top.x, peak1_baseR.x, snowLevel1 * 1.1); let snowP1_R_y = lerp(peak1_top.y, peak1_baseR.y, snowLevel1); vertex(snowP1_R_x, snowP1_R_y); endShape(CLOSE); fill(MOUNTAIN_LIGHT); triangle(peak2_baseL.x, peak2_baseL.y, peak2_top.x, peak2_top.y, peak2_baseR.x, peak2_baseR.y); let snowLevel2 = 0.4; fill(SNOW_COLOR); beginShape(); vertex(peak2_top.x, peak2_top.y); let snowP2_L_x = lerp(peak2_top.x, peak2_baseL.x, snowLevel2 * 1.15); let snowP2_L_y = lerp(peak2_top.y, peak2_baseL.y, snowLevel2); vertex(snowP2_L_x, snowP2_L_y); let snowP2_R_x = lerp(peak2_top.x, peak2_baseR.x, snowLevel2 * 1.1); let snowP2_R_y = lerp(peak2_top.y, peak2_baseR.y, snowLevel2); vertex(snowP2_R_x, snowP2_R_y); endShape(CLOSE); fill(MOUNTAIN_GREEN); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y); curveVertex(width * 0.15, GROUND_Y * 0.95); vertex(width * 0.2, GROUND_Y * 0.85); curveVertex(width * 0.28, GROUND_Y * 0.98); vertex(width * 0.35, GROUND_Y); vertex(peak1_baseR.x, GROUND_Y); vertex(peak2_baseL.x, GROUND_Y); curveVertex(width * 0.58, GROUND_Y * 0.9); vertex(width * 0.6, GROUND_Y * 0.8); curveVertex(width * 0.75, GROUND_Y); vertex(width * 0.85, GROUND_Y); vertex(peak2_baseR.x, GROUND_Y); vertex(width, GROUND_Y); vertex(width, height); vertex(0, height); endShape(CLOSE); fill(GROUND_COLOR); rect(width / 2, GROUND_Y + (height - GROUND_Y) / 2, width, height - GROUND_Y); strokeWeight(1); for(let i = 0; i < 10; i++) { let lineY = GROUND_Y + (height - GROUND_Y) * (i / 10) * random(0.8, 1.2); let lineCol = lerpColor(color(GROUND_COLOR), color(GROUND_HIGHLIGHT), random(0.3, 0.7)); stroke(red(lineCol), green(lineCol), blue(lineCol), 100); line(0, lineY, width, lineY); } noStroke(); }
-
-function drawHut() {
-    // Don't draw if hut doesn't exist
-    if (!hut) return;
-
-    if (hut.destroyed) {
-        // Draw the static rubble pile
-        if (hut.rubbleDetails && hut.rubbleDetails.length > 0) {
-            push();
-            translate(hut.x, hut.y + hut.h * 0.2); // Base translation for rubble pile
-            noStroke();
-            // Draw crater effect (optional, can be simple)
-            fill(GROUND_COLOR[0]*0.8, GROUND_COLOR[1]*0.8, GROUND_COLOR[2]*0.8);
-            ellipse(0, GROUND_Y - hut.y - hut.h * 0.2, hut.w * 1.1, hut.h * 0.4);
-
-            // Draw the pre-calculated rubble pieces
-            for (const detail of hut.rubbleDetails) {
-                fill(detail.color);
-                // Draw rubble relative to the translated origin
-                rect(detail.x, detail.y - hut.h * 0.2, detail.w, detail.h, detail.r); // Adjust Y based on translation
-            }
-            pop();
-        }
-    } else {
-        // Draw the intact hut
-        push();
-        translate(hut.x, hut.y);
-        noStroke();
-        // Roof
-        fill(HUT_ROOF);
-        triangle(-hut.w / 2 - 5, -hut.h / 2, hut.w / 2 + 5, -hut.h / 2, 0, -hut.h / 2 - hut.h * 0.6);
-        // Walls
-        fill(HUT_WALL);
-        rect(0, 0, hut.w, hut.h);
-        // Door
-        fill(HUT_DOOR);
-        rect(-hut.w * 0.25, hut.h * 0.1, hut.w * 0.3, hut.h * 0.7, 3);
-        // Window
-        fill(currentSkyLowerBlue[0]*0.7, currentSkyLowerBlue[1]*0.7, currentSkyLowerBlue[2]*0.7);
-        rect(hut.w * 0.25, -hut.h * 0.1, hut.w * 0.35, hut.h * 0.35, 2);
-        // Window Panes
-        stroke(HUT_ROOF); strokeWeight(2);
-        let winX = hut.w * 0.25; let winY = -hut.h * 0.1; let winW = hut.w * 0.35; let winH = hut.h * 0.35;
-        line(winX - winW/2, winY, winX + winW/2, winY); // Horizontal
-        line(winX, winY - winH/2, winX, winY + winH/2); // Vertical
-        // Wall Planks
-        noStroke(); stroke(HUT_WALL[0] * 0.8, HUT_WALL[1] * 0.8, HUT_WALL[2] * 0.8, 150); strokeWeight(1);
-        for(let i = 0; i < 6; i++) {
-            let lineY = -hut.h/2 + (hut.h / 6) * (i + 0.5);
-            line(-hut.w/2, lineY, hut.w/2, lineY);
-        }
-        noStroke();
-        pop();
-    }
-}
-
+function drawHut() { if (!hut) return; if (hut.destroyed) { if (hut.rubbleDetails && hut.rubbleDetails.length > 0) { push(); translate(hut.x, hut.y + hut.h * 0.2); noStroke(); fill(GROUND_COLOR[0]*0.8, GROUND_COLOR[1]*0.8, GROUND_COLOR[2]*0.8); ellipse(0, GROUND_Y - hut.y - hut.h * 0.2, hut.w * 1.1, hut.h * 0.4); for (const detail of hut.rubbleDetails) { fill(detail.color); rect(detail.x, detail.y - hut.h * 0.2, detail.w, detail.h, detail.r); } pop(); } } else { push(); translate(hut.x, hut.y); noStroke(); fill(HUT_ROOF); triangle(-hut.w / 2 - 5, -hut.h / 2, hut.w / 2 + 5, -hut.h / 2, 0, -hut.h / 2 - hut.h * 0.6); fill(HUT_WALL); rect(0, 0, hut.w, hut.h); fill(HUT_DOOR); rect(-hut.w * 0.25, hut.h * 0.1, hut.w * 0.3, hut.h * 0.7, 3); fill(currentSkyLowerBlue[0]*0.7, currentSkyLowerBlue[1]*0.7, currentSkyLowerBlue[2]*0.7); rect(hut.w * 0.25, -hut.h * 0.1, hut.w * 0.35, hut.h * 0.35, 2); stroke(HUT_ROOF); strokeWeight(2); let winX = hut.w * 0.25; let winY = -hut.h * 0.1; let winW = hut.w * 0.35; let winH = hut.h * 0.35; line(winX - winW/2, winY, winX + winW/2, winY); line(winX, winY - winH/2, winX, winY + winH/2); stroke(HUT_WALL[0] * 0.8, HUT_WALL[1] * 0.8, HUT_WALL[2] * 0.8, 150); strokeWeight(1); for(let i = 0; i < 6; i++) { let lineY = -hut.h/2 + (hut.h / 6) * (i + 0.5); line(-hut.w/2, lineY, hut.w/2, lineY); } noStroke(); pop(); } }
 function drawUI() { textSize(40); textFont('monospace'); fill(SCORE_COLOR); stroke(0); strokeWeight(3); textAlign(LEFT, BOTTOM); text(nf(score1, 2), 20, height - 10); textAlign(RIGHT, BOTTOM); text(nf(score2, 2), width - 20, height - 10); noStroke(); }
-function displayPowerUpStatus(plane, x, y) { if (!plane.isAlive || !plane.activePowerUp) return; push(); textAlign(LEFT, BOTTOM); textSize(18); textFont('monospace'); let powerUpName = plane.activePowerUp; let remainingTime = ceil(plane.powerUpTimer / 60); let displayColor = POWERUP_COLORS[powerUpName] || [255, 255, 255]; fill(displayColor); stroke(0); strokeWeight(2); text(`${powerUpName}: ${remainingTime}s`, x, y); let barWidth = 100; let barHeight = 8; let currentWidth = map(plane.powerUpTimer, 0, POWERUP_DURATION_FRAMES, 0, barWidth); noStroke(); fill(100); rect(x + barWidth / 2, y + barHeight, barWidth, barHeight); fill(displayColor); rect(x + currentWidth / 2, y + barHeight, currentWidth, barHeight); pop(); noStroke(); }
 
-// --- NEW: Helper Function to Update Sky Colors ---
-function updateWeatherVisuals() {
-    if (isCurrentlyRaining) {
-        // Darken sky colors
-        currentSkyTop = SKY_TOP.map(c => c * RAIN_DARKNESS_FACTOR);
-        currentSkyUpperBand = SKY_UPPER_BAND.map(c => c * RAIN_DARKNESS_FACTOR);
-        currentSkyMidBlue = SKY_MID_BLUE.map(c => c * RAIN_DARKNESS_FACTOR);
-        currentSkyLowerBlue = SKY_LOWER_BLUE.map(c => c * RAIN_DARKNESS_FACTOR);
-        console.log("Weather: Rain starting");
-    } else {
-        // Restore default sky colors
-        currentSkyTop = [...SKY_TOP];
-        currentSkyUpperBand = [...SKY_UPPER_BAND];
-        currentSkyMidBlue = [...SKY_MID_BLUE];
-        currentSkyLowerBlue = [...SKY_LOWER_BLUE];
-        console.log("Weather: Clearing up");
+// Updated to display multiple powerups
+function displayPowerUpStatus(plane, x, y, maxWidth, alignRight = false) {
+    if (!plane.isAlive || Object.keys(plane.activePowerUps).length === 0) return;
+
+    push();
+    textFont('monospace');
+    textSize(18);
+    strokeWeight(2);
+    let currentY = y;
+    let iconsPerRow = floor(maxWidth / (POWERUP_SIZE + 10)); // Calculate how many icons fit
+    let iconSize = POWERUP_SIZE * 0.8; // Smaller icons for status display
+    let iconSpacing = iconSize + 8;
+    let currentX = alignRight ? x - iconSize : x;
+    let countInRow = 0;
+
+    // Loop through active power-ups
+    for (const type in plane.activePowerUps) {
+        if (plane.activePowerUps.hasOwnProperty(type)) {
+            let remainingFrames = plane.activePowerUps[type];
+            let remainingTime = ceil(remainingFrames / 60);
+            let displayColor = POWERUP_COLORS[type] || [255, 255, 255];
+
+            // Draw Icon
+            push();
+            translate(currentX + iconSize / 2, currentY + iconSize / 2);
+            // Maybe scale icons down slightly?
+            scale(iconSize / POWERUP_SIZE);
+            // Draw a simplified icon (reusing PowerUp display logic is complex here)
+            stroke(0); fill(displayColor);
+                 if (type === 'RapidFire') { rect(0,0, POWERUP_SIZE*0.6, POWERUP_SIZE*0.6, 3); }
+            else if (type === 'SpeedBoost') { triangle(0, -POWERUP_SIZE*0.4, -POWERUP_SIZE*0.4, POWERUP_SIZE*0.3, POWERUP_SIZE*0.4, POWERUP_SIZE*0.3); }
+            else if (type === 'Shield') { ellipse(0,0, POWERUP_SIZE, POWERUP_SIZE); }
+            else if (type === 'TripleShot') { rect(0,0, POWERUP_SIZE*0.2, POWERUP_SIZE*0.6); rect(-POWERUP_SIZE*0.3,0, POWERUP_SIZE*0.2, POWERUP_SIZE*0.6); rect(POWERUP_SIZE*0.3,0, POWERUP_SIZE*0.2, POWERUP_SIZE*0.6);}
+            else if (type === 'Bomb') { ellipse(0,0,POWERUP_SIZE, POWERUP_SIZE); }
+            else if (type === 'Trampoline') { noFill(); arc(0, POWERUP_SIZE*0.1, POWERUP_SIZE*0.8, POWERUP_SIZE*0.6, 180, 360); line(-POWERUP_SIZE*0.4, POWERUP_SIZE*0.1, POWERUP_SIZE*0.4, POWERUP_SIZE*0.1);}
+            else if (type === 'ChickenLauncher') { ellipse(0,0, POWERUP_SIZE*0.7, POWERUP_SIZE*0.5);}
+            else if (type === 'BubbleGun') { ellipse(0, 0, POWERUP_SIZE, POWERUP_SIZE); noFill(); stroke(255,150); arc(0,0, POWERUP_SIZE*0.6, POWERUP_SIZE*0.6, 90, 270);}
+            else if (type === 'ReverseGun') { triangle(POWERUP_SIZE*0.4, 0, -POWERUP_SIZE*0.4, -POWERUP_SIZE*0.3, -POWERUP_SIZE*0.4, POWERUP_SIZE*0.3);}
+            else if (type === 'RainbowTrail') { noFill(); for(let i=0; i<3; i++){stroke(random(RAINBOW_COLORS)); arc(0,0, POWERUP_SIZE*0.8, POWERUP_SIZE*0.8, i*60, (i+1)*60);} }
+            else { rect(0,0, POWERUP_SIZE, POWERUP_SIZE); } // Default
+            pop();
+
+            // Draw Timer Bar below icon
+            let barWidth = iconSize;
+            let barHeight = 5;
+            let barY = currentY + iconSize + 2;
+            let currentBarWidth = map(remainingFrames, 0, POWERUP_DURATION_FRAMES, 0, barWidth);
+            noStroke();
+            fill(100);
+            rect(currentX + barWidth / 2, barY + barHeight / 2, barWidth, barHeight); // Background bar
+            fill(displayColor);
+            rect(currentX + currentBarWidth / 2, barY + barHeight / 2, currentBarWidth, barHeight); // Foreground bar
+
+            // Move to next position
+            countInRow++;
+            if (alignRight) {
+                currentX -= iconSpacing;
+            } else {
+                currentX += iconSpacing;
+            }
+
+            // Wrap to next row if needed (optional, simple layout for now)
+            // if (countInRow >= iconsPerRow) {
+            //     currentY += iconSize + barHeight + 10; // Move down
+            //     currentX = alignRight ? x - iconSize : x; // Reset X
+            //     countInRow = 0;
+            // }
+        }
     }
-    // Could also adjust cloud color/alpha here if desired
+    pop();
+    noStroke();
 }
 
-// --- NEW: Helper function to destroy the hut ---
-function destroyHut(hutObj) {
-    if (!hutObj || hutObj.destroyed) return; // Already destroyed or doesn't exist
 
-    console.log("Hut DESTROYED!");
-    hutObj.destroyed = true;
-    hutObj.rubbleDetails = []; // Initialize the array
-
-    // Create the particle explosion effect
-    createExplosion(hutObj.x, hutObj.y, HUT_DESTRUCTION_PARTICLES, BOMB_EXPLOSION_COLORS.concat(HUT_RUBBLE_COLORS), true); // Use bomb colors + rubble
-
-    // Generate static rubble details
-    for (let i = 0; i < HUT_RUBBLE_PIECES; i++) {
-        let rubbleCol = random(HUT_RUBBLE_COLORS);
-        // Positions relative to the hut's center (will be drawn with translation)
-        // Y position needs to be adjusted so rubble sits near the ground level (relative to hut center)
-        let baseY = hutObj.h * 0.5; // Bottom edge relative to center
-        let rubbleX = random(-hutObj.w * 0.6, hutObj.w * 0.6);
-        let rubbleY = baseY - random(0, hutObj.h * 0.6); // Place rubble starting from bottom upwards
-        let rubbleW = random(hutObj.w * 0.1, hutObj.w * 0.35);
-        let rubbleH = random(hutObj.h * 0.1, hutObj.h * 0.3);
-        let rubbleR = random(1, 3); // Corner radius
-
-        hutObj.rubbleDetails.push({
-            x: rubbleX,
-            y: rubbleY, // Store Y relative to hut center
-            w: rubbleW,
-            h: rubbleH,
-            r: rubbleR,
-            color: rubbleCol
-        });
-    }
-}
+// --- Helper Function to Update Sky Colors ---
+function updateWeatherVisuals() { if (isCurrentlyRaining) { currentSkyTop = SKY_TOP.map(c => c * RAIN_DARKNESS_FACTOR); currentSkyUpperBand = SKY_UPPER_BAND.map(c => c * RAIN_DARKNESS_FACTOR); currentSkyMidBlue = SKY_MID_BLUE.map(c => c * RAIN_DARKNESS_FACTOR); currentSkyLowerBlue = SKY_LOWER_BLUE.map(c => c * RAIN_DARKNESS_FACTOR); } else { currentSkyTop = [...SKY_TOP]; currentSkyUpperBand = [...SKY_UPPER_BAND]; currentSkyMidBlue = [...SKY_MID_BLUE]; currentSkyLowerBlue = [...SKY_LOWER_BLUE]; } }
+// --- Helper function to destroy the hut ---
+function destroyHut(hutObj) { if (!hutObj || hutObj.destroyed) return; /* console.log("Hut DESTROYED!"); */ hutObj.destroyed = true; hutObj.rubbleDetails = []; createExplosion(hutObj.x, hutObj.y, HUT_DESTRUCTION_PARTICLES, BOMB_EXPLOSION_COLORS.concat(HUT_RUBBLE_COLORS), true); for (let i = 0; i < HUT_RUBBLE_PIECES; i++) { let rubbleCol = random(HUT_RUBBLE_COLORS); let baseY = hutObj.h * 0.5; let rubbleX = random(-hutObj.w * 0.6, hutObj.w * 0.6); let rubbleY = baseY - random(0, hutObj.h * 0.6); let rubbleW = random(hutObj.w * 0.1, hutObj.w * 0.35); let rubbleH = random(hutObj.h * 0.1, hutObj.h * 0.3); let rubbleR = random(1, 3); hutObj.rubbleDetails.push({ x: rubbleX, y: rubbleY, w: rubbleW, h: rubbleH, r: rubbleR, color: rubbleCol }); } }
 
 
 // =====================
-// --- Plane Class ---
+// --- Plane Class --- (Major Changes for Multiple Powerups)
 // =====================
 class Plane {
     constructor(x, y, bodyCol, wingCol, accentCol, controls, id) {
-        this.id = id; this.startPos = createVector(x, y); this.bodyColor = color(bodyCol); this.wingColor = color(wingCol); this.accentColor = color(accentCol); this.controls = controls; this.size = 22; this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = (id === 2) ? 180 : 0; this.isAlive = true; this.isOnGround = true; this.respawnTimer = 0; this.shootCooldown = 0; this.isThrusting = false; this.isTurningLeft = false; this.isTurningRight = false; this.planePoints = this.createPlaneShape(); this.engineSound = null; this.isStalled = false; this.activePowerUp = null; this.powerUpTimer = 0;
+        this.id = id;
+        this.startPos = createVector(x, y);
+        this.bodyColor = color(bodyCol);
+        this.wingColor = color(wingCol);
+        this.accentColor = color(accentCol);
+        this.controls = controls;
+        this.size = PLANE_BASE_SIZE; // Fixed size
+        this.position = this.startPos.copy();
+        this.velocity = createVector(0, 0);
+        this.angle = (id === 2) ? 180 : 0;
+        this.isAlive = true;
+        this.isOnGround = true;
+        this.respawnTimer = 0;
+        this.shootCooldown = 0;
+        this.isThrusting = false;
+        this.isTurningLeft = false;
+        this.isTurningRight = false;
+        this.planePoints = this.createPlaneShape(this.size); // Create based on fixed size
+        this.engineSound = null;
+        this.isStalled = false;
+        this.isBubbled = false;
+        this.bubbleTimer = 0;
+        this.rainbowTrailCounter = 0;
+        // NEW: Store multiple active powerups and their timers
+        this.activePowerUps = {}; // e.g., { 'Shield': 1800, 'RapidFire': 1500 }
     }
+
     assignEngineSound(soundObject) { this.engineSound = soundObject; }
-    createPlaneShape() { let s = this.size; return { fuselage: [ {x: s * 0.8, y: 0}, {x: s * 0.6, y: -s * 0.1}, {x: -s * 0.7, y: -s * 0.15}, {x: -s * 0.95, y: -s * 0.05}, {x: -s * 0.9, y: 0}, {x: -s * 0.95, y: s * 0.05}, {x: -s * 0.7, y: s * 0.15}, {x: s * 0.6, y: s * 0.1} ], topWing: [ {x: s * 0.35, y: -s * 0.25}, {x: s * 0.25, y: -s * 0.7}, {x: -s * 0.45, y: -s * 0.7}, {x: -s * 0.4, y: -s * 0.25} ], bottomWing: [ {x: s * 0.25, y: s * 0.25}, {x: s * 0.15, y: s * 0.6}, {x: -s * 0.35, y: s * 0.6}, {x: -s * 0.3, y: s * 0.25} ], tailplane: [ {x: -s * 0.75, y: -s * 0.1}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 1.0, y: 0}, {x: -s * 1.05, y: s * 0.35}, {x: -s * 0.75, y: s * 0.1} ], rudder: [ {x: -s * 0.9, y: 0}, {x: -s * 1.15, y: -s * 0.4}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 0.75, y: -s * 0.1} ], cockpit: [ {x: s * 0.4, y: -s * 0.1}, {x: s * 0.1, y: -s*0.35}, {x: -s*0.1, y: -s*0.25} ], wheels: [ {x: s*0.15, y: s*0.7}, {x: -s*0.2, y: s*0.7} ], wheelRadius: s * 0.18 }; }
-    handleInput(keys) { if (!this.isAlive || this.respawnTimer > 0) { this.isThrusting = false; this.isTurningLeft = false; this.isTurningRight = false; return; } this.isThrusting = keys[this.controls.thrust] || false; this.isTurningLeft = keys[this.controls.left] || false; this.isTurningRight = keys[this.controls.right] || false; if (keys[this.controls.shoot]) { this.shoot(); } }
+    createPlaneShape(s) { return { fuselage: [ {x: s * 0.8, y: 0}, {x: s * 0.6, y: -s * 0.1}, {x: -s * 0.7, y: -s * 0.15}, {x: -s * 0.95, y: -s * 0.05}, {x: -s * 0.9, y: 0}, {x: -s * 0.95, y: s * 0.05}, {x: -s * 0.7, y: s * 0.15}, {x: s * 0.6, y: s * 0.1} ], topWing: [ {x: s * 0.35, y: -s * 0.25}, {x: s * 0.25, y: -s * 0.7}, {x: -s * 0.45, y: -s * 0.7}, {x: -s * 0.4, y: -s * 0.25} ], bottomWing: [ {x: s * 0.25, y: s * 0.25}, {x: s * 0.15, y: s * 0.6}, {x: -s * 0.35, y: s * 0.6}, {x: -s * 0.3, y: s * 0.25} ], tailplane: [ {x: -s * 0.75, y: -s * 0.1}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 1.0, y: 0}, {x: -s * 1.05, y: s * 0.35}, {x: -s * 0.75, y: s * 0.1} ], rudder: [ {x: -s * 0.9, y: 0}, {x: -s * 1.15, y: -s * 0.4}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 0.75, y: -s * 0.1} ], cockpit: [ {x: s * 0.4, y: -s * 0.1}, {x: s * 0.1, y: -s*0.35}, {x: -s*0.1, y: -s*0.25} ], wheels: [ {x: s*0.15, y: s*0.7}, {x: -s*0.2, y: s*0.7} ], wheelRadius: s * 0.18 }; }
+    handleInput(keys) { if (!this.isAlive || this.respawnTimer > 0 || this.isBubbled) { this.isThrusting = false; this.isTurningLeft = false; this.isTurningRight = false; return; } this.isThrusting = keys[this.controls.thrust] || false; this.isTurningLeft = keys[this.controls.left] || false; this.isTurningRight = keys[this.controls.right] || false; if (keys[this.controls.shoot]) { this.shoot(); } }
     applyForce(force) { this.velocity.add(force); }
 
     update() {
-        // --- Respawn Timer ---
-        if (this.respawnTimer > 0) {
-            this.respawnTimer--;
-            if (this.respawnTimer <= 0) {
-                this.respawn();
-            }
-            return; // Don't update further if waiting to respawn
-        }
+        if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; }
+        if (!this.isAlive) { if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05); return; }
 
-        // --- Exit if not Alive ---
-        if (!this.isAlive) {
-            if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05);
-            return;
-        }
-
-        // --- Cooldowns and Timers ---
         if (this.shootCooldown > 0) { this.shootCooldown--; }
 
-        // --- <<< MOVED PowerUp Timer Decrement >>> ---
-        // Decrement timer if it's active and positive
-        if (this.activePowerUp && this.powerUpTimer > 0) {
-            this.powerUpTimer--;
-        }
-        // --- <<< END MOVED SECTION >>> ---
-
-        // --- Turning ---
-        if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
-        if (this.isTurningRight) { this.angle += TURN_SPEED; }
-
-
-        // --- START: Determine Stall State (V26 - Unified Sine Logic) ---
-        let checkAngle = this.angle; // For logging
-        let normAngle = (this.angle % 360 + 360) % 360; // For other checks potentially
-        let currentlyStalled = this.isStalled; // Store state before potential change
-
-        let verticalPointing = sin(this.angle);
-        const STALL_ENTRY_SIN_THRESHOLD = sin(STALL_ANGLE_THRESHOLD);
-        const STALL_RECOVERY_SIN_THRESHOLD = sin(STALL_RECOVERY_ANGLE);
-
-        if (!this.isOnGround) {
-            if (!this.isStalled) {
-                let enterStall = (verticalPointing < STALL_ENTRY_SIN_THRESHOLD);
-                if (enterStall) {
-                     this.isStalled = true;
-                     if (!currentlyStalled) { console.log(`Plane ${this.id} stalled! Angle: ${checkAngle.toFixed(1)} Sin: ${verticalPointing.toFixed(3)} [Entry]`); }
+        // --- PowerUp Timer Update ---
+        for (const type in this.activePowerUps) {
+            if (this.activePowerUps.hasOwnProperty(type)) {
+                this.activePowerUps[type]--; // Decrement timer
+                if (this.activePowerUps[type] <= 0) {
+                    // console.log(`Plane ${this.id} ${type} expired.`);
+                    delete this.activePowerUps[type]; // Remove expired powerup
                 }
-            } else {
-                let exitStall = (verticalPointing > STALL_RECOVERY_SIN_THRESHOLD);
-                 if (exitStall) {
-                     this.isStalled = false;
-                     if (currentlyStalled) { console.log(`Plane ${this.id} recovered! Angle: ${checkAngle.toFixed(1)} Sin: ${verticalPointing.toFixed(3)} [Exit]`); }
-                 }
-            }
-        } else {
-            if (this.isStalled) {
-                this.isStalled = false;
             }
         }
-        // --- END: Determine Stall State ---
 
+        // --- Bubble State Update ---
+        if (this.isBubbled) {
+             this.bubbleTimer--;
+             if (this.bubbleTimer <= 0) { this.isBubbled = false; this.velocity.y -= 0.5; }
+             else { this.applyForce(createVector(0, -BUBBLE_FLOAT_FORCE)); this.velocity.mult(0.96); this.angle += sin(frameCount * 3 + this.id) * 0.5; }
+        }
+
+        // --- Ground Check Y (fixed size) ---
+        let groundCheckY = GROUND_Y - (this.size * 0.8);
+
+        // --- Movement controls only if NOT bubbled ---
+        if (!this.isBubbled) { if (this.isTurningLeft) { this.angle -= TURN_SPEED; } if (this.isTurningRight) { this.angle += TURN_SPEED; } }
+
+        // --- Stall Check ---
+        let verticalPointing = sin(this.angle); const STALL_ENTRY_SIN_THRESHOLD = sin(STALL_ANGLE_THRESHOLD); const STALL_RECOVERY_SIN_THRESHOLD = sin(STALL_RECOVERY_ANGLE);
+        if (!this.isOnGround && !this.isBubbled) { if (!this.isStalled) { if (verticalPointing < STALL_ENTRY_SIN_THRESHOLD) { this.isStalled = true; } } else { if (verticalPointing > STALL_RECOVERY_SIN_THRESHOLD) { this.isStalled = false; } } }
+        else { if (this.isStalled) { this.isStalled = false; } }
 
         // --- Forces ---
-        let thrustVector = createVector(0, 0);
-        let currentThrustForce = THRUST_FORCE;
-        if (this.activePowerUp === 'SpeedBoost') { currentThrustForce *= 1.6; }
-        if (this.isStalled) {
-            currentThrustForce *= STALL_EFFECT_FACTOR;
-        }
-        if (this.isThrusting) {
-             thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce);
-        }
+        let thrustVector = createVector(0, 0); let currentThrustForce = THRUST_FORCE;
+        if (this.activePowerUps['SpeedBoost']) { currentThrustForce *= 1.6; } // Check specific powerup
+        if (this.isStalled) { currentThrustForce *= STALL_EFFECT_FACTOR; }
+        if (this.isThrusting && !this.isBubbled) { thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce); }
 
-
-        // --- Physics based on Grounded vs Airborne ---
-        let groundCheckY = GROUND_Y - this.size * 0.8; // Define once
-
+        // --- Physics: Grounded vs Airborne ---
         if (this.isOnGround) {
-            // Apply ground friction
-            this.velocity.x *= GROUND_FRICTION;
-
-            // --- Determine Takeoff Angle Status ---
-            let isAngledForTakeoff = false;
-            // normAngle already calculated above in stall check
-            const TAKEOFF_MIN_ANGLE_P1 = -10; // Slightly steeper than before
-            const TAKEOFF_MAX_ANGLE_P1 = -85;
-            const TAKEOFF_MIN_ANGLE_P2 = 190; // Slightly steeper than before
-            const TAKEOFF_MAX_ANGLE_P2 = 265;
-
-            if (this.id === 1) {
-                isAngledForTakeoff = (this.angle < TAKEOFF_MIN_ANGLE_P1 && this.angle > TAKEOFF_MAX_ANGLE_P1);
-            } else { // Plane 2
-                isAngledForTakeoff = (normAngle > TAKEOFF_MIN_ANGLE_P2 && normAngle < TAKEOFF_MAX_ANGLE_P2);
-            }
-            // --- End Takeoff Angle Status ---
-
-
-            // Apply thrust - Use the calculated isAngledForTakeoff
-            if (this.isThrusting) {
-                if (isAngledForTakeoff) { // Use the consistent boolean
-                    // Apply thrust with slight upward component
-                    this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15));
-                } else {
-                    // Apply purely horizontal thrust
-                    this.applyForce(createVector(thrustVector.x, 0));
-                }
-            }
-
-            // Apply gravity - Use the calculated isAngledForTakeoff
-             if (!this.isThrusting || !isAngledForTakeoff) { // Use the consistent boolean
-                 // Standard ground gravity if not thrusting OR not angled for takeoff
-                 this.applyForce(createVector(0, GRAVITY_FORCE * 2));
-             } else {
-                 // Reduced gravity ONLY when thrusting AND angled for takeoff
-                 this.applyForce(createVector(0, GRAVITY_FORCE * 0.5));
-             }
-
-            // --- Takeoff Check (later in ground logic) ---
-             // Ensure plane stays on ground if it dips slightly below
-             if (this.position.y > groundCheckY) {
-                 this.position.y = groundCheckY;
-                 if(this.velocity.y > 0) this.velocity.y = 0;
-             }
-
-             // Check takeoff conditions
-             let horizontalSpeed = abs(this.velocity.x);
-
-             // Execute takeoff - Use the consistent boolean isAngledForTakeoff
-             if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED) {
-                 this.isOnGround = false;
-                 this.isStalled = false; // Reset stall state on takeoff
-                 this.velocity.y -= THRUST_FORCE * 0.6; // Give a little initial lift boost
-                 console.log(`Plane ${this.id} took off. Speed: ${horizontalSpeed.toFixed(2)}, Angle: ${this.angle.toFixed(1)}`);
-             }
-             // --- End Takeoff Check ---
-
+            this.velocity.x *= GROUND_FRICTION; let normAngle = (this.angle % 360 + 360) % 360; const TAKEOFF_MIN_ANGLE_P1 = -10; const TAKEOFF_MAX_ANGLE_P1 = -85; const TAKEOFF_MIN_ANGLE_P2 = 190; const TAKEOFF_MAX_ANGLE_P2 = 265; let isAngledForTakeoff = (this.id === 1) ? (this.angle < TAKEOFF_MIN_ANGLE_P1 && this.angle > TAKEOFF_MAX_ANGLE_P1) : (normAngle > TAKEOFF_MIN_ANGLE_P2 && normAngle < TAKEOFF_MAX_ANGLE_P2);
+            if (this.isThrusting && !this.isBubbled) { if (isAngledForTakeoff) { this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15)); } else { this.applyForce(createVector(thrustVector.x, 0)); } }
+            if (!this.isThrusting || !isAngledForTakeoff || this.isBubbled) { this.applyForce(createVector(0, GRAVITY_FORCE * 2)); } else { this.applyForce(createVector(0, GRAVITY_FORCE * 0.5)); }
+            if (this.position.y > groundCheckY) { this.position.y = groundCheckY; if(this.velocity.y > 0) this.velocity.y = 0; }
+            let horizontalSpeed = abs(this.velocity.x); if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED && !this.isBubbled) { this.isOnGround = false; this.isStalled = false; this.velocity.y -= currentThrustForce * 3.0; }
         } else { // --- Airborne Physics ---
-            // Apply thrust (already calculated with potential stall reduction)
-            this.applyForce(thrustVector);
-
-            // Calculate base lift
-            let speed = this.velocity.mag();
-            let liftMagnitude = speed * LIFT_FACTOR;
-
-            // Apply Rain Effect (Conditional)
-            if (isCurrentlyRaining) {
-                 liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR;
-            }
-
-            // Apply stall effect to lift (if currently stalled)
-            if (this.isStalled) {
-                liftMagnitude *= STALL_EFFECT_FACTOR;
-            }
-
-            // Apply lift force
-            let liftForce = createVector(0, -liftMagnitude);
-            this.applyForce(liftForce);
-
-            // Apply gravity
-            this.applyForce(createVector(0, GRAVITY_FORCE));
-
-            // Apply air drag
-            this.velocity.mult(DAMPING_FACTOR);
-        } // End of Airborne vs Grounded block
+            if (!this.isBubbled) {
+                this.applyForce(thrustVector); let speed = this.velocity.mag(); let liftMagnitude = speed * LIFT_FACTOR;
+                if (isCurrentlyRaining) { liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR; }
+                if (this.isStalled) { liftMagnitude *= STALL_EFFECT_FACTOR; }
+                this.applyForce(createVector(0, -liftMagnitude)); this.applyForce(createVector(0, GRAVITY_FORCE)); this.velocity.mult(DAMPING_FACTOR);
+            } else { this.applyForce(createVector(0, GRAVITY_FORCE * 0.3)); } // Bubble physics
+        }
 
         // --- Update Position ---
         this.position.add(this.velocity);
 
-        // --- Ground Interaction / State Changes (Post-Position Update) ---
-        // Check for Landing
+        // --- Landing / Ground Interaction (Post-Position Update) ---
         if (this.position.y >= groundCheckY && !this.isOnGround) {
-             let isTooSteep = (normAngle > 45 && normAngle < 135) || (normAngle > 225 && normAngle < 315);
-             let verticalSpeed = this.velocity.y;
+             let normAngle = (this.angle % 360 + 360) % 360; let isTooSteep = (normAngle > 45 && normAngle < 135) || (normAngle > 225 && normAngle < 315); let verticalSpeed = this.velocity.y;
 
-             // Check for crash landing
-             if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && this.activePowerUp !== 'Shield') {
-                 console.log(`Plane ${this.id} CRASH LANDED! V Speed: ${verticalSpeed.toFixed(2)}, Angle: ${this.angle.toFixed(1)}, TooSteep: ${isTooSteep}`);
-                 this.hit(true);
-                 return;
+             // --- TRAMPOLINE OVERRIDE ---
+             if (this.activePowerUps['Trampoline'] && verticalSpeed > 0 && !this.isBubbled) { // If trampoline active, always try to bounce
+                  if (verticalSpeed < TRAMPOLINE_MAX_SPEED_THRESHOLD) { // Bounce only if speed is low enough
+                     // console.log(`Plane ${this.id} bounced (Trampoline)! Speed: ${verticalSpeed.toFixed(2)}`);
+                      this.position.y = groundCheckY - 1; this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE; this.velocity.x *= 0.9; this.velocity.add(p5.Vector.random2D().mult(0.5));
+                      if (audioStarted && soundNodesStarted && boingSound && boingEnv) { boingSound.freq(random(300, 600)); boingEnv.play(boingSound); }
+                      this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.05); // Use up some powerup time faster
+                  } else {
+                      // Land normally even with trampoline if speed is too high (prevent infinite bounce)
+                      this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0;
+                      if (this.isBubbled) { this.isBubbled = false; this.bubbleTimer = 0; if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound); }
+                  }
              }
-             else { // Safe landing (or shield absorbed impact)
-                 this.isOnGround = true;
-                 this.isStalled = false;
-                 this.position.y = groundCheckY;
-                 this.velocity.y = 0;
-
-                 if (this.activePowerUp === 'Shield' && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) {
-                     console.log(`Plane ${this.id} Shield absorbed hard landing!`);
-                     // Reduce timer - use max to prevent going below zero here
-                     this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.5);
-                 } else {
-                    // console.log(`Plane ${this.id} landed safely. V Speed: ${verticalSpeed.toFixed(2)}`);
+             // --- REGULAR LANDING / CRASH CHECK (Only if Trampoline NOT active) ---
+             else {
+                 if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && !this.activePowerUps['Shield'] && !this.isBubbled) { this.hit(true); return; } // CRASH
+                 else { // Safe landing or Shield absorb
+                     this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0;
+                     if (this.isBubbled) { this.isBubbled = false; this.bubbleTimer = 0; if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound); }
+                     if (this.activePowerUps['Shield'] && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) { if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.4); } // Use up shield faster
                  }
              }
         }
 
-
         // --- Boundary Constraints ---
-        if (this.position.x > width + this.size) { this.position.x = -this.size; }
-        else if (this.position.x < -this.size) { this.position.x = width + this.size; }
-        if (this.position.y < this.size / 2) {
-            this.position.y = this.size / 2;
-            if (this.velocity.y < 0) { this.velocity.y = 0; }
-        }
+        if (this.position.x > width + this.size) { this.position.x = -this.size; } else if (this.position.x < -this.size) { this.position.x = width + this.size; } if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
 
-        // --- Collisions & Sound (if still alive after potential crash landing) ---
-        if (!this.isAlive) return; // Double check
+        // --- Collisions (Hut, Balloon) if still alive ---
+        if (!this.isAlive) return;
+        if (this.checkCollisionHut(hut)) { if (!this.isAlive) return; } // Hit logic inside checkCollisionHut
+        if (balloon.isAlive) { let distanceSq = (this.position.x - balloon.pos.x)**2 + (this.position.y - balloon.pos.y)**2; let combinedRadiusSq = (this.size * 0.9 + balloon.radius)**2; if (distanceSq < combinedRadiusSq) { if (this.activePowerUps['Shield']) { balloon.hit(); if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2); } else if (!this.isBubbled) { this.hit(true); return; } } }
 
-        // Hut Collision - Pass the hut object
-        if (this.checkCollisionHut(hut)) return; // hit() called inside checkCollisionHut
-
-        // Balloon Collision
-        if (balloon.isAlive) {
-            let planeCollisionRadius = this.size * 0.9;
-            let distance = dist(this.position.x, this.position.y, balloon.pos.x, balloon.pos.y);
-            let combinedRadius = planeCollisionRadius + balloon.radius;
-
-            if (distance < combinedRadius) {
-                if (this.activePowerUp === 'Shield') {
-                    console.log(`Plane ${this.id} Shield popped balloon!`);
-                    balloon.hit();
-                    this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.3);
-                } else {
-                    console.log(`Plane ${this.id} crashed into balloon!`);
-                    this.hit(true);
-                    return;
-                }
-            }
-        }
-
-
-        // --- <<< ADDED/MODIFIED PowerUp Expiration Check >>> ---
-        // Check *after* physics and collisions (which might modify the timer)
-        // If a power-up is marked as active, but its timer has run out, deactivate it.
-        if (this.activePowerUp && this.powerUpTimer <= 0) {
-            console.log(`Plane ${this.id} ${this.activePowerUp} expired (End of Update Check). Timer: ${this.powerUpTimer}`);
-            this.activePowerUp = null;
-            // this.powerUpTimer = 0; // Ensure it's exactly 0 (optional, null check is primary)
-        }
-        // --- <<< END ADDED/MODIFIED SECTION >>> ---
-
+        // --- Rainbow Trail Emission ---
+        if (this.activePowerUps['RainbowTrail'] && !this.isOnGround) { this.rainbowTrailCounter++; if (this.rainbowTrailCounter >= RAINBOW_TRAIL_PARTICLE_INTERVAL) { this.rainbowTrailCounter = 0; let trailColor = RAINBOW_COLORS[rainbowColorIndex % RAINBOW_COLORS.length]; let offset = p5.Vector.fromAngle(radians(this.angle + 180), this.size * 0.5); let spawnPos = p5.Vector.add(this.position, offset); if (particles.length < MAX_PARTICLES) { particles.push(new RainbowParticle(spawnPos.x, spawnPos.y, trailColor)); } rainbowColorIndex++; if (random() < 0.1 && audioStarted && soundNodesStarted && rainbowSparkleSound && rainbowEnv) { rainbowSparkleSound.freq(random(800, 1600)); rainbowEnv.play(rainbowSparkleSound); } } }
 
         // --- Engine Sound ---
-        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) {
-            let speed = this.velocity.mag();
-            let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
-            let targetAmp = this.isThrusting ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
+        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) { let speed = this.velocity.mag(); let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true); let targetAmp = (this.isThrusting && !this.isBubbled) ? MAX_ENGINE_AMP : BASE_ENGINE_AMP; if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; } if (this.activePowerUps['SpeedBoost']) { targetFreq *= 1.1; targetAmp *= 1.1; } if (this.isBubbled) { targetAmp = BASE_ENGINE_AMP * 0.5; targetFreq = BASE_ENGINE_FREQ * 0.8; } this.engineSound.amp(targetAmp, 0.1); this.engineSound.freq(targetFreq, 0.1); }
+        else if (this.engineSound && this.engineSound.getAmp() > 0) { this.engineSound.amp(0, 0.1); }
+    } // --- End of update() ---
 
-            if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; }
-            if (this.activePowerUp === 'SpeedBoost') { targetFreq *= 1.1; targetAmp *= 1.1; }
-
-            if (abs(this.engineSound.getAmp() - targetAmp) > 0.001 || targetAmp > 0.01) {
-                this.engineSound.amp(targetAmp, 0.1);
-            } else if (targetAmp < 0.01 && this.engineSound.getAmp() > 0) {
-                 this.engineSound.amp(0, 0.1);
-            }
-            this.engineSound.freq(targetFreq, 0.1);
+    display() {
+        push(); translate(this.position.x, this.position.y); rotate(this.angle); if (this.id === 2) { scale(1, -1); }
+        // No overall scaling needed now - fixed size
+        if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) { /* Flicker */ }
+        else {
+            stroke(0); strokeWeight(1.5); let pp = this.planePoints;
+            fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.accentColor); beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.wingColor); beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE); noFill(); stroke(0, 150); strokeWeight(1.5); if (pp.cockpit.length >= 2) { beginShape(); curveVertex(pp.cockpit[0].x, pp.cockpit[0].y); for(let p of pp.cockpit) { curveVertex(p.x, p.y); } curveVertex(pp.cockpit[pp.cockpit.length - 1].x, pp.cockpit[pp.cockpit.length - 1].y); endShape(); }
+            let wheelDrawThreshold = GROUND_Y - this.size * 3; if (this.isOnGround || (!this.isOnGround && this.position.y > wheelDrawThreshold) || (!this.isOnGround && this.velocity.y > 0.3)) { fill(40); noStroke(); ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2); ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2); stroke(60); strokeWeight(3); line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1); line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1); }
+            noStroke(); let noseX = this.size * 0.85; let propHeight = this.size * 0.9; let propWidthRunning = this.size * 0.15; let propWidthStopped = this.size * 0.05; let engineRunning = (this.isThrusting || (this.velocity.magSq() > 0.5)) && !this.isBubbled; if (engineRunning) { fill(PROPELLER_BLUR_COLOR); ellipse(noseX, 0, propWidthRunning, propHeight); } else { fill(PROPELLER_STOPPED_COLOR); rect(noseX, 0, propWidthStopped, propHeight); } fill(this.accentColor); ellipse(noseX, 0, this.size * 0.2, this.size * 0.2);
+            // --- Display Active Powerup Effects ---
+            if (this.activePowerUps['Shield']) { let shieldTimer = this.activePowerUps['Shield']; let shieldAlpha = SHIELD_COLOR[3] * (0.7 + sin(frameCount * 4) * 0.3); if (shieldTimer < 120 && floor(frameCount / 5) % 2 === 0) { shieldAlpha = 0; } fill(SHIELD_COLOR[0], SHIELD_COLOR[1], SHIELD_COLOR[2], shieldAlpha); noStroke(); ellipse(0, 0, this.size * 2.8, this.size * 2.2); }
+             if (this.isBubbled) { let bubbleAlpha = BUBBLE_FILL_COLOR[3] * (0.8 + sin(frameCount * 2) * 0.2); fill(BUBBLE_FILL_COLOR[0], BUBBLE_FILL_COLOR[1], BUBBLE_FILL_COLOR[2], bubbleAlpha); strokeWeight(2); stroke(BUBBLE_STROKE_COLOR[0],BUBBLE_STROKE_COLOR[1],BUBBLE_STROKE_COLOR[2], BUBBLE_STROKE_COLOR[3] * 0.8); ellipse(0, 0, this.size * 3.0, this.size * 3.0); noFill(); stroke(255, 255, 255, 100); arc(this.size * -0.5, this.size * -0.5, this.size * 1.5, this.size * 1.5, 180, 270); }
+             // Add other visual effects here (e.g., speed boost trail?)
         }
-        else if (this.engineSound && this.engineSound.getAmp() > 0) {
-            this.engineSound.amp(0, 0.0);
-        }
-    } // --- End of update() method ---
+        pop(); noStroke();
+    }
 
-    display() { push(); translate(this.position.x, this.position.y); rotate(this.angle); if (this.id === 2) { scale(1, -1); } if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) { /* Flicker */ } else { stroke(0); strokeWeight(1.5); let pp = this.planePoints; fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.accentColor); beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.wingColor); beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE); noFill(); stroke(0, 150); strokeWeight(1.5); if (pp.cockpit.length >= 2) { beginShape(); curveVertex(pp.cockpit[0].x, pp.cockpit[0].y); for(let p of pp.cockpit) { curveVertex(p.x, p.y); } curveVertex(pp.cockpit[pp.cockpit.length - 1].x, pp.cockpit[pp.cockpit.length - 1].y); endShape(); } if (this.isOnGround || (!this.isOnGround && this.position.y > GROUND_Y - this.size * 3) || (!this.isOnGround && this.velocity.y > 0.3)) { fill(40); noStroke(); ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2); ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2); stroke(60); strokeWeight(3); line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1); line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1); } noStroke(); let noseX = this.size * 0.85; let propHeight = this.size * 0.9; let propWidthRunning = this.size * 0.15; let propWidthStopped = this.size * 0.05; let engineRunning = this.isThrusting || (this.velocity.magSq() > 0.5); if (engineRunning) { fill(PROPELLER_BLUR_COLOR); ellipse(noseX, 0, propWidthRunning, propHeight); } else { fill(PROPELLER_STOPPED_COLOR); rect(noseX, 0, propWidthStopped, propHeight); } fill(this.accentColor); ellipse(noseX, 0, this.size * 0.2, this.size * 0.2); if (this.activePowerUp === 'Shield' && this.powerUpTimer > 0) { let shieldAlpha = SHIELD_COLOR[3] * (0.7 + sin(frameCount * 4) * 0.3); if (this.powerUpTimer < 120 && floor(frameCount / 5) % 2 === 0) { shieldAlpha = 0; } fill(SHIELD_COLOR[0], SHIELD_COLOR[1], SHIELD_COLOR[2], shieldAlpha); noStroke(); ellipse(0, 0, this.size * 2.8, this.size * 2.2); } } pop(); noStroke(); }
 
     shoot() {
-        let isAngledForShootingOnGround = false; let normalizedAngle = (this.angle % 360 + 360) % 360;
-        if (this.id === 1) { isAngledForShootingOnGround = (this.angle < -10 && this.angle > -170); }
-        else { isAngledForShootingOnGround = (normalizedAngle > 190 && normalizedAngle < 350); }
-        let canShoot = !this.isOnGround || (this.isOnGround && isAngledForShootingOnGround);
+        let isAngledForShootingOnGround = false; let normalizedAngle = (this.angle % 360 + 360) % 360; if (this.id === 1) { isAngledForShootingOnGround = (this.angle < -10 && this.angle > -170); } else { isAngledForShootingOnGround = (normalizedAngle > 190 && normalizedAngle < 350); }
+        let canShoot = (!this.isOnGround || (this.isOnGround && isAngledForShootingOnGround)) && !this.isBubbled;
 
         let currentCooldown = SHOOT_COOLDOWN_FRAMES;
-        if (this.activePowerUp === 'RapidFire') { currentCooldown = SHOOT_COOLDOWN_FRAMES / 2.5; }
-        else if (this.activePowerUp === 'TripleShot') { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.5; }
-        else if (this.activePowerUp === 'Bomb') { currentCooldown = SHOOT_COOLDOWN_FRAMES * 2.0; }
+        // Check for specific powerups affecting cooldown
+        if (this.activePowerUps['RapidFire']) { currentCooldown = SHOOT_COOLDOWN_FRAMES / 2.5; }
+        else if (this.activePowerUps['TripleShot']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.5; }
+        else if (this.activePowerUps['Bomb']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 2.0; }
+        else if (this.activePowerUps['ChickenLauncher']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.2; }
+        else if (this.activePowerUps['BubbleGun']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.8; }
+        // ReverseGun doesn't change cooldown itself
 
         if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
+            let originOffsetDistance = this.size * 0.9; // Use fixed size
+            let spawnAngle = this.angle; let spawnOffsetVector = createVector(originOffsetDistance, 0);
+            if (this.activePowerUps['ReverseGun']) { spawnAngle += 180; spawnOffsetVector = createVector(-this.size * 0.9, 0); } // Adjust spawn for reverse
+            let rotatedOffset = spawnOffsetVector.copy().rotate(this.angle); let spawnPos = p5.Vector.add(this.position, rotatedOffset);
 
-            if (this.activePowerUp === 'Bomb') {
-                // Drop Bomb
-                let originOffsetDistanceBomb = -this.size * 0.3;
-                let originOffsetVectorBomb = createVector(originOffsetDistanceBomb, 0);
-                let rotatedOffsetBomb = originOffsetVectorBomb.copy().rotate(this.angle);
-                let spawnPosBomb = p5.Vector.add(this.position, rotatedOffsetBomb);
-                let newBomb = new Bomb(spawnPosBomb.x, spawnPosBomb.y, this.id, this.velocity);
-                bombs.push(newBomb);
-
-                // ALSO Shoot a Bullet
-                let originOffsetDistanceBullet = this.size * 0.9;
-                let originOffsetVectorBullet = createVector(originOffsetDistanceBullet, 0);
-                let rotatedOffsetBullet = originOffsetVectorBullet.copy().rotate(this.angle);
-                let spawnPosBullet = p5.Vector.add(this.position, rotatedOffsetBullet);
-                let bulletAngle = this.angle;
-                let newBullet = new Bullet(spawnPosBullet.x, spawnPosBullet.y, bulletAngle, this.id, this.bodyColor);
-                bullets.push(newBullet);
-
-                if (bombDropSound && audioStarted && soundNodesStarted) { bombDropSound.play(shootNoise); }
-
-            } else if (this.activePowerUp === 'TripleShot') {
-                // Fire Triple Bullets
-                let originOffsetDistance = this.size * 0.9;
-                let originOffsetVector = createVector(originOffsetDistance, 0);
-                let rotatedOffset = originOffsetVector.copy().rotate(this.angle);
-                let spawnPos = p5.Vector.add(this.position, rotatedOffset);
-
-                let baseAngle = this.angle; let angle1 = baseAngle - TRIPLE_SHOT_SPREAD_ANGLE; let angle2 = baseAngle; let angle3 = baseAngle + TRIPLE_SHOT_SPREAD_ANGLE;
-                bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle1, this.id, this.bodyColor));
-                bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle2, this.id, this.bodyColor));
-                bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle3, this.id, this.bodyColor));
-                shootSoundEnv.play(shootNoise);
-
-            } else {
-                // Fire Single Bullet (RapidFire handled by lower cooldown)
-                 let originOffsetDistance = this.size * 0.9;
-                 let originOffsetVector = createVector(originOffsetDistance, 0);
-                 let rotatedOffset = originOffsetVector.copy().rotate(this.angle);
-                 let spawnPos = p5.Vector.add(this.position, rotatedOffset);
-
-                 let bulletAngle = this.angle;
-                 let newBullet = new Bullet(spawnPos.x, spawnPos.y, bulletAngle, this.id, this.bodyColor);
-                 bullets.push(newBullet);
-                 shootSoundEnv.play(shootNoise);
+            let fired = false;
+            // Determine projectile based on active powerups (priority?) Bomb > Triple > Wacky > Normal
+            if (this.activePowerUps['Bomb']) {
+                let bombOffsetDist = -this.size * 0.3; let bombOffsetVec = createVector(bombOffsetDist, 0).rotate(this.angle); let bombSpawnPos = p5.Vector.add(this.position, bombOffsetVec);
+                bombs.push(new Bomb(bombSpawnPos.x, bombSpawnPos.y, this.id, this.velocity)); if (bombDropSound && shootNoise) { bombDropSound.play(shootNoise); }
+                // Also fire bullet (forward/reverse based on ReverseGun)
+                bullets.push(new Bullet(spawnPos.x, spawnPos.y, spawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
+            } else if (this.activePowerUps['TripleShot']) {
+                let angle1 = spawnAngle - TRIPLE_SHOT_SPREAD_ANGLE; let angle2 = spawnAngle; let angle3 = spawnAngle + TRIPLE_SHOT_SPREAD_ANGLE;
+                bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle1, this.id, this.bodyColor)); bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle2, this.id, this.bodyColor)); bullets.push(new Bullet(spawnPos.x, spawnPos.y, angle3, this.id, this.bodyColor));
+                 if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
+            } else if (this.activePowerUps['ChickenLauncher']) {
+                 bullets.push(new ChickenProjectile(spawnPos.x, spawnPos.y, spawnAngle, this.id)); if (chickenSound && chickenEnv) { chickenSound.freq(random(700,1000)); chickenEnv.play(chickenSound); } fired = true;
+            } else if (this.activePowerUps['BubbleGun']) {
+                 bullets.push(new BubbleProjectile(spawnPos.x, spawnPos.y, spawnAngle, this.id)); if (shootSoundEnv && shootNoise) { /* Modify sound? */ shootSoundEnv.play(shootNoise); } fired = true;
+            } else { // Normal bullet (RapidFire handled by cooldown, ReverseGun by spawnAngle)
+                 bullets.push(new Bullet(spawnPos.x, spawnPos.y, spawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             }
-            this.shootCooldown = currentCooldown;
+            if (fired) { this.shootCooldown = currentCooldown; }
         }
     }
 
 
     checkCollisionHut(hutObj) {
-        if (!this.isAlive || this.respawnTimer > 0 || !hutObj || hutObj.destroyed) return false;
-        if (this.activePowerUp === 'Shield') return false;
+        if (!this.isAlive || this.respawnTimer > 0 || !hutObj || hutObj.destroyed || this.isBubbled) return false;
+        let collisionRadius = this.size; let hutMinX = hutObj.x - hutObj.w / 2; let hutMaxX = hutObj.x + hutObj.w / 2; let hutMinY = hutObj.y - hutObj.h / 2; let hutMaxY = hutObj.y + hutObj.h / 2; let closestX = constrain(this.position.x, hutMinX, hutMaxX); let closestY = constrain(this.position.y, hutMinY, hutMaxY); let distanceSq = (this.position.x - closestX)**2 + (this.position.y - closestY)**2;
 
-        let s = this.size; let halfW = s * 1.2; let halfH = s * 0.75;
-        let planeMinX = this.position.x - max(halfW, halfH);
-        let planeMaxX = this.position.x + max(halfW, halfH);
-        let planeMinY = this.position.y - max(halfW, halfH);
-        let planeMaxY = this.position.y + max(halfW, halfH);
-
-        let hutMinX = hutObj.x - hutObj.w / 2;
-        let hutMaxX = hutObj.x + hutObj.w / 2;
-        let hutMinY = hutObj.y - hutObj.h / 2;
-        let hutMaxY = hutObj.y + hutObj.h / 2;
-
-        if (planeMaxX < hutMinX || planeMinX > hutMaxX || planeMaxY < hutMinY || planeMinY > hutMaxY) {
-            return false;
-        }
-
-        let collisionOccurred = (planeMaxX > hutMinX && planeMinX < hutMaxX && planeMaxY > hutMinY && planeMinY < hutMaxY);
-
-        if (collisionOccurred) {
-            console.log(`Plane ${this.id} hit hut!`);
-            this.hit(true);
-            return true;
-        }
-        return false;
+        if (distanceSq < collisionRadius * collisionRadius) {
+            let hitRoof = this.position.y < hutObj.y - hutObj.h * 0.3 && this.velocity.y > 0;
+            if (this.activePowerUps['Trampoline'] && hitRoof && this.velocity.y > 0 && this.velocity.y < TRAMPOLINE_MAX_SPEED_THRESHOLD) { // Bounce off roof if Trampoline
+                 this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE * 0.8; this.velocity.x *= 0.95;
+                 if(this.activePowerUps['Trampoline']) this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.1); // Use up faster
+                 if (audioStarted && soundNodesStarted && boingSound && boingEnv) { boingSound.freq(random(400, 700)); boingEnv.play(boingSound); } return false;
+            } else if (!this.activePowerUps['Shield']) { this.hit(true); return true; } // Crash if not shielded
+            return false; // Shielded, pass through
+        } return false; // No collision
     }
 
 
-    hit(causedByCrashOrBomb, bullet = null) {
-        if (!this.isAlive) return false; // Already hit/dead
+    hit(causedByCrashOrBomb, projectile = null) {
+        if (!this.isAlive) return false;
 
-        // Shield Deflection (only for bullets)
-        if (this.activePowerUp === 'Shield' && !causedByCrashOrBomb && bullet) {
-             console.log(`Plane ${this.id} Shield deflected bullet!`);
-             if (audioStarted && soundNodesStarted) { shieldDeflectSound.play(shootNoise); }
-             // Reduce shield timer - use max to prevent going below zero here
-             this.powerUpTimer = max(0, this.powerUpTimer - POWERUP_DURATION_FRAMES * 0.1);
-             return false; // Bullet was deflected, plane not hit
+        if (this.activePowerUps['Shield'] && !causedByCrashOrBomb && projectile && !(projectile instanceof BubbleProjectile)) {
+             if (audioStarted && soundNodesStarted && shieldDeflectSound && shootNoise) { shieldDeflectSound.play(shootNoise); }
+             if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.15); // Use up shield faster on hit
+             return false; // Deflected
         }
 
-        // If not shielded or hit by crash/bomb/hut etc.
-        console.log(`Plane ${this.id} HIT! ${causedByCrashOrBomb ? "(Crash/Hut/Balloon/Bomb)" : "(Bullet)"}`);
-        this.isAlive = false;
-        this.isOnGround = false;
-        this.isStalled = false;
-        this.activePowerUp = null; // Lose powerup on hit
-        this.powerUpTimer = 0;
-        this.velocity = createVector(random(-1.5, 1.5), -2.5); // Explosion impulse
-        this.respawnTimer = RESPAWN_DELAY_FRAMES;
+        if (!causedByCrashOrBomb && projectile && projectile instanceof BubbleProjectile) {
+             if (!this.isBubbled) { this.isBubbled = true; this.bubbleTimer = BUBBLE_TRAP_DURATION; this.velocity.mult(0.1); if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) { bubbleEnv.play(bubblePopSound); } }
+             return false; // Bubbled, not "hit"
+        }
 
+        this.isAlive = false; this.isOnGround = false; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0;
+        this.activePowerUps = {}; // Clear all powerups on hit
+        this.velocity = createVector(random(-1.5, 1.5), -2.5); this.respawnTimer = RESPAWN_DELAY_FRAMES;
         createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
-        if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0); // Stop engine sound
+        if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0);
 
-        // Award score if the hit was caused by environment/crash/bomb (not a self-inflicted crash into balloon/hut)
-        // or if hit by opponent's bullet/bomb
         let otherPlayerId = (this.id === 1) ? 2 : 1;
-        let causedByOpponent = (bullet && bullet.ownerId === otherPlayerId) || (causedByCrashOrBomb && bullet === null); // bullet === null implies crash/hut/bomb hit
-
-        if (causedByOpponent) {
-             if (this.id === 1) {
-                 score2++; console.log("Hit/Crash! Point for Player 2!");
-             } else {
-                 score1++; console.log("Hit/Crash! Point for Player 1!");
-             }
-        }
-
-        return true; // Plane was successfully hit
+        let causedByOpponentProjectile = projectile && projectile.ownerId === otherPlayerId;
+        if (causedByOpponentProjectile) { if (this.id === 1) { score2++; } else { score1++; } }
+        // Note: Bomb score handled in Bomb.explode, Plane-Plane score handled in draw() collision check
+        return true;
     }
 
 
-    respawn() { let startX = (this.id === 1) ? width * 0.1 : width * 0.9; let startY = GROUND_Y - this.size * 0.8; this.startPos = createVector(startX, startY); this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = (this.id === 2) ? 180 : 0; this.isAlive = true; this.isOnGround = true; this.isStalled = false; this.activePowerUp = null; this.powerUpTimer = 0; this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2; console.log(`Plane ${this.id} Respawned.`); if (this.engineSound && audioStarted && soundNodesStarted) { this.engineSound.freq(BASE_ENGINE_FREQ, 0.1); this.engineSound.amp(BASE_ENGINE_AMP, 0.1); } }
-    collectPowerUp(type) { if (!this.isAlive || this.respawnTimer > 0) return; console.log(`Plane ${this.id} collected ${type}!`); this.activePowerUp = type; this.powerUpTimer = POWERUP_DURATION_FRAMES; if (audioStarted && soundNodesStarted) { powerUpCollectSound.play(explosionNoise); } }
-}
+    respawn() {
+        let startY = GROUND_Y - this.size * 0.8; let startX = (this.id === 1) ? width * 0.1 : width * 0.9; this.startPos = createVector(startX, startY);
+        this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = (this.id === 2) ? 180 : 0; this.isAlive = true; this.isOnGround = true; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0;
+        this.activePowerUps = {}; // Clear powerups on respawn
+        this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2;
+        if (this.engineSound && audioStarted && soundNodesStarted) { this.engineSound.freq(BASE_ENGINE_FREQ, 0.1); this.engineSound.amp(BASE_ENGINE_AMP, 0.1); }
+    }
 
-// ======================
-// --- Bullet Class ---
-// ======================
-class Bullet { constructor(x, y, angle, ownerId, planeColor) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED); this.ownerId = ownerId; this.size = 8; this.life = 150; this.planeColor = planeColor; this.coreColor = color(BULLET_CORE_BRIGHTNESS); this.trailColor = color(red(planeColor), green(planeColor), blue(planeColor), BULLET_TRAIL_ALPHA); } update() { this.position.add(this.velocity); this.life--; } display() { push(); translate(this.position.x, this.position.y); rotate(degrees(this.velocity.heading())); strokeWeight(2.5); stroke(this.trailColor); line(-this.size * 0.6, 0, this.size * 0.4, 0); strokeWeight(1.5); stroke(this.coreColor); line(-this.size * 0.4, 0, this.size * 0.2, 0); pop(); noStroke(); } isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size); } checkCollision(plane) { if (plane.id === this.ownerId || !plane.isAlive || plane.respawnTimer > 0) { return false; } let collisionRadius = plane.size * 0.8; let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < (collisionRadius + this.size / 2); }
-    // Updated checkCollisionHut to accept the hut object
-    checkCollisionHut(hutObj) {
-        if (!hutObj || hutObj.destroyed) return false; // Check if hut exists and is not destroyed
-        return (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2);
+    collectPowerUp(type) {
+        if (!this.isAlive || this.respawnTimer > 0) return;
+        // console.log(`Plane ${this.id} collected ${type}!`);
+        // Add or refresh the powerup timer in the object
+        this.activePowerUps[type] = POWERUP_DURATION_FRAMES;
+        if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); }
     }
 }
 
+
+// ======================
+// --- Bullet Class --- (Removed size scaling)
+// ======================
+class Bullet {
+    constructor(x, y, angle, ownerId, planeColor) { // Removed planeSize
+        this.position = createVector(x, y);
+        this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED);
+        this.ownerId = ownerId;
+        this.size = 8; // Fixed size
+        this.life = 150;
+        this.planeColor = planeColor;
+        this.coreColor = color(BULLET_CORE_BRIGHTNESS);
+        let trailAlpha = min(BULLET_TRAIL_ALPHA, alpha(planeColor));
+        this.trailColor = color(red(planeColor), green(planeColor), blue(planeColor), trailAlpha);
+    }
+    update() { this.position.add(this.velocity); this.life--; }
+    display() { push(); translate(this.position.x, this.position.y); rotate(degrees(this.velocity.heading())); strokeWeight(2.5); stroke(this.trailColor); line(-this.size * 0.6, 0, this.size * 0.4, 0); strokeWeight(1.5); stroke(this.coreColor); line(-this.size * 0.4, 0, this.size * 0.2, 0); pop(); noStroke(); }
+    isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size); }
+
+    checkCollision(target, targetIsBalloon = false) { // Uses target.size for planes now
+        if (!target || typeof target.isAlive === 'undefined' || !target.isAlive) return false;
+        if (target instanceof Plane && (target.id === this.ownerId || target.respawnTimer > 0)) return false;
+        if (!target.position || typeof target.position.x === 'undefined') return false;
+        let targetRadius;
+        if (targetIsBalloon) { if (typeof target.radius === 'undefined') return false; targetRadius = target.radius; }
+        else { if (typeof target.size === 'undefined') return false; targetRadius = target.size * 0.8; } // Use fixed plane size
+        let distanceSq = (this.position.x - target.position.x)**2 + (this.position.y - target.position.y)**2;
+        let radiiSq = (targetRadius + this.size / 2)**2;
+        return distanceSq < radiiSq;
+    }
+    hitEffect(plane) { plane.hit(false, this); }
+    checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; let hit = (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2); if(hit) { createExplosion(this.position.x, this.position.y, 5, HUT_WALL); } return hit; }
+}
+
+// ============================
+// --- ChickenProjectile Class ---
+// ============================
+class ChickenProjectile { // Unchanged from previous version as size was fixed
+    constructor(x, y, angle, ownerId) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), CHICKEN_SPEED); this.ownerId = ownerId; this.size = 15; this.life = 180; this.bounces = 0; this.maxBounces = 3; this.rotation = random(360); this.rotationSpeed = random(-5, 5); this.gravity = GRAVITY_FORCE * 0.8; }
+    update() { this.velocity.y += this.gravity; this.position.add(this.velocity); this.rotation += this.rotationSpeed; this.life--; if (this.position.y > GROUND_Y - this.size / 2 && this.velocity.y > 0) { if (this.bounces < this.maxBounces) { this.position.y = GROUND_Y - this.size / 2; this.velocity.y *= -CHICKEN_BOUNCE_FACTOR; this.velocity.x *= 0.9; this.bounces++; this.rotationSpeed *= -0.8; if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(500,800)); chickenEnv.play(chickenSound); } } else { this.position.y = GROUND_Y - this.size / 2; this.velocity.y = 0; this.velocity.x *= 0.8; this.gravity = 0; this.rotationSpeed *= 0.5; } } }
+    display() { push(); translate(this.position.x, this.position.y); rotate(this.rotation); noStroke(); fill(CHICKEN_BODY_COLOR); ellipse(0, 0, this.size, this.size * 0.7); ellipse(this.size * 0.4, -this.size * 0.1, this.size * 0.5, this.size * 0.4); fill(255, 180, 0); triangle(this.size * 0.6, -this.size * 0.1, this.size * 0.75, -this.size * 0.2, this.size * 0.75, 0); fill(CHICKEN_ACCENT_COLOR); rect(this.size * 0.35, -this.size * 0.35, this.size * 0.2, this.size * 0.15, 2); ellipse(this.size * 0.45, -this.size * 0.3, this.size * 0.15, this.size * 0.15); fill(0); ellipse(this.size * 0.5, -this.size * 0.15, 2, 2); pop(); }
+    isOffscreen() { return (this.life <= 0 || this.position.x < -this.size * 2 || this.position.x > width + this.size * 2 || this.position.y > height + this.size); }
+    checkCollision(target, targetIsBalloon = false) { // Uses target.size for planes
+        if (!target || typeof target.isAlive === 'undefined' || !target.isAlive) return false;
+        if (target instanceof Plane && (target.id === this.ownerId || target.respawnTimer > 0)) return false;
+        if (!target.position || typeof target.position.x === 'undefined') return false;
+        let targetRadius;
+        if (targetIsBalloon) { if (typeof target.radius === 'undefined') return false; targetRadius = target.radius; }
+        else { if (typeof target.size === 'undefined') return false; targetRadius = target.size * 0.8; } // Use fixed plane size
+        let distanceSq = (this.position.x - target.position.x)**2 + (this.position.y - target.position.y)**2;
+        let radiiSq = (targetRadius + this.size / 2)**2;
+        return distanceSq < radiiSq;
+    }
+    hitEffect(plane) { let pushVector = p5.Vector.sub(plane.position, this.position).normalize().mult(0.5); plane.velocity.add(pushVector); if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(900,1200)); chickenEnv.play(chickenSound); } }
+    checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; let hit = (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2); if(hit) { this.velocity.mult(-0.5); if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(500,800)); chickenEnv.play(chickenSound); } } return false; }
+}
+
+
+// ==========================
+// --- BubbleProjectile Class ---
+// ==========================
+class BubbleProjectile { // Unchanged from previous version
+    constructor(x, y, angle, ownerId) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BUBBLE_SPEED); this.ownerId = ownerId; this.size = 25; this.life = 240; this.wobbleOffset = random(100); this.wobbleMagnitude = this.size * 0.05; }
+    update() { this.velocity.y -= GRAVITY_FORCE * 0.05; this.velocity.mult(0.995); this.position.add(this.velocity); this.life--; }
+    display() { push(); translate(this.position.x, this.position.y); let wobbleX = sin(frameCount * 3 + this.wobbleOffset) * this.wobbleMagnitude; let wobbleY = cos(frameCount * 2.5 + this.wobbleOffset * 1.2) * this.wobbleMagnitude; let currentSize = this.size * (1 + sin(frameCount + this.wobbleOffset) * 0.03); noFill(); strokeWeight(2.5); stroke(BUBBLE_STROKE_COLOR[0],BUBBLE_STROKE_COLOR[1],BUBBLE_STROKE_COLOR[2], BUBBLE_STROKE_COLOR[3]); ellipse(wobbleX, wobbleY, currentSize, currentSize); fill(BUBBLE_FILL_COLOR[0],BUBBLE_FILL_COLOR[1],BUBBLE_FILL_COLOR[2], BUBBLE_FILL_COLOR[3]); noStroke(); ellipse(wobbleX, wobbleY, currentSize, currentSize); noFill(); stroke(255, 255, 255, 150); strokeWeight(1.5); arc(wobbleX - currentSize * 0.2, wobbleY - currentSize * 0.2, currentSize * 0.6, currentSize * 0.6, 150, 300); pop(); }
+    isOffscreen() { return (this.life <= 0 || this.position.x < -this.size * 2 || this.position.x > width + this.size * 2 || this.position.y < -this.size * 2 || this.position.y > height + this.size); }
+    checkCollision(target, targetIsBalloon = false) { // Uses target.size for planes
+        if (!target || typeof target.isAlive === 'undefined' || !target.isAlive) return false;
+        if (target instanceof Plane && (target.id === this.ownerId || target.respawnTimer > 0)) return false;
+        if (!target.position || typeof target.position.x === 'undefined') return false;
+        let targetRadius;
+        if (targetIsBalloon) { if (typeof target.radius === 'undefined') return false; targetRadius = target.radius; }
+        else { if (typeof target.size === 'undefined') return false; targetRadius = target.size * 0.8; } // Use fixed plane size
+        let distanceSq = (this.position.x - target.position.x)**2 + (this.position.y - target.position.y)**2;
+        let radiiSq = (targetRadius + this.size / 2)**2;
+        return distanceSq < radiiSq;
+    }
+    hitEffect(plane) { plane.hit(false, this); }
+    checkCollisionHut(hutObj) { return false; }
+}
+
 // =====================
-// --- Cloud Class ---
+// --- Cloud Class --- (Unchanged)
 // =====================
- class Cloud { constructor() { this.pos = createVector(0,0); this.vel = createVector(0,0); this.size = 100; this.puffOffsets = []; this.numPuffs = 7; this.opacity = 200; this.speedFactor = 1; this.direction = 1; this.reset(); this.pos.x = random(width); } reset() { this.direction = random() < 0.5 ? -1 : 1; this.size = random(100, 190); let startX = this.direction > 0 ? -this.size * 1.5 : width + this.size * 1.5; this.pos = createVector(startX, random(height * 0.1, height * 0.6)); this.speedFactor = random(0.5, 1.5); this.vel = createVector(CLOUD_BASE_SPEED * this.direction * this.speedFactor, 0); this.numPuffs = floor(random(6, 12)); this.puffOffsets = []; for (let i = 0; i < this.numPuffs; i++) { let puffX = random(-this.size * 0.7, this.size * 0.7); let puffY = random(-this.size * 0.3, this.size * 0.3); let puffR = random(this.size * 0.4, this.size * 0.9) * random(0.8, 1.2); this.puffOffsets.push({ x: puffX, y: puffY, r: puffR }); } this.opacity = random(190, 240); }
-     update() {
-         this.pos.add(this.vel);
-         if ( (this.vel.x > 0 && this.pos.x - this.size * 1.5 > width) || (this.vel.x < 0 && this.pos.x + this.size * 1.5 < 0) ) { this.reset(); }
-         if (this.pos.y < -this.size || this.pos.y > height + this.size) { this.reset(); }
-     }
-     display() { push(); noStroke(); translate(this.pos.x, this.pos.y); fill(CLOUD_SHADOW[0], CLOUD_SHADOW[1], CLOUD_SHADOW[2], this.opacity * 0.6); ellipse(0, this.size * 0.25, this.size * 1.3, this.size * 0.7); fill(CLOUD_COLOR[0], CLOUD_COLOR[1], CLOUD_COLOR[2], this.opacity); for (let puff of this.puffOffsets) { ellipse(puff.x, puff.y, puff.r, puff.r * 0.85); } pop(); }
+ class Cloud { constructor() { this.pos = createVector(0,0); this.vel = createVector(0,0); this.size = 100; this.puffOffsets = []; this.numPuffs = 7; this.opacity = 200; this.speedFactor = 1; this.direction = 1; this.reset(); this.pos.x = random(width); } reset() { this.direction = random() < 0.5 ? -1 : 1; this.size = random(100, 190); let startX = this.direction > 0 ? -this.size * 1.5 : width + this.size * 1.5; this.pos = createVector(startX, random(height * 0.1, height * 0.6)); this.speedFactor = random(0.5, 1.5); this.vel = createVector(CLOUD_BASE_SPEED * this.direction * this.speedFactor, 0); this.numPuffs = floor(random(6, 12)); this.puffOffsets = []; for (let i = 0; i < this.numPuffs; i++) { let puffX = random(-this.size * 0.7, this.size * 0.7); let puffY = random(-this.size * 0.3, this.size * 0.3); let puffR = random(this.size * 0.4, this.size * 0.9) * random(0.8, 1.2); this.puffOffsets.push({ x: puffX, y: puffY, r: puffR }); } this.opacity = random(190, 240); } update() { this.pos.add(this.vel); if ( (this.vel.x > 0 && this.pos.x - this.size * 1.5 > width) || (this.vel.x < 0 && this.pos.x + this.size * 1.5 < 0) ) { this.reset(); } if (this.pos.y < -this.size || this.pos.y > height + this.size) { this.reset(); } } display() { push(); noStroke(); translate(this.pos.x, this.pos.y); fill(CLOUD_SHADOW[0], CLOUD_SHADOW[1], CLOUD_SHADOW[2], this.opacity * 0.6); ellipse(0, this.size * 0.25, this.size * 1.3, this.size * 0.7); fill(CLOUD_COLOR[0], CLOUD_COLOR[1], CLOUD_COLOR[2], this.opacity); for (let puff of this.puffOffsets) { ellipse(puff.x, puff.y, puff.r, puff.r * 0.85); } pop(); } }
+
+// ==========================
+// --- Hot Air Balloon Class --- (Includes respawn fix)
+// ==========================
+class Balloon { constructor(x, y) { this.basePos = createVector(x, y); this.pos = this.basePos.copy(); this.position = this.pos; this.bobbleOffset = 0; this.bobbleSpeed = 0.6; this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.radius = 30; this.visualRadius = 30; this.basketSize = { w: 25, h: 18 }; this.ropeLength = 25; this.isAlive = true; this.respawnTimer = 0; }
+    update() { if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; } if (!this.isAlive) return; this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; this.basePos.x += this.driftSpeed; if (this.driftSpeed > 0 && this.basePos.x > width + this.visualRadius * 2) { this.basePos.x = -this.visualRadius * 2; } else if (this.driftSpeed < 0 && this.basePos.x < -this.visualRadius * 2) { this.basePos.x = width + this.visualRadius * 2; } this.pos.y = this.basePos.y + this.bobbleOffset; this.pos.x = this.basePos.x; }
+    display() { if (this.respawnTimer > 0 && !this.isAlive) { if (floor(this.respawnTimer / 8) % 2 !== 0) { return; } } else if (!this.isAlive && this.respawnTimer <= 0) { return; } push(); translate(this.pos.x, this.pos.y); noStroke(); let basketTopY = this.visualRadius * 0.8 + this.ropeLength; let basketBottomY = basketTopY + this.basketSize.h; let basketCenterX = 0; stroke(BALLOON_ROPE); strokeWeight(1.5); line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.visualRadius * 0.5, this.visualRadius * 0.7); line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.visualRadius * 0.5, this.visualRadius * 0.7); line(basketCenterX, basketTopY - 3, 0, this.visualRadius * 0.8); fill(BALLOON_BASKET); rect(basketCenterX, basketTopY + this.basketSize.h / 2, this.basketSize.w, this.basketSize.h, 3); fill(BALLOON_BASKET[0]*0.8, BALLOON_BASKET[1]*0.8, BALLOON_BASKET[2]*0.8); rect(basketCenterX, basketTopY + 2, this.basketSize.w, 4, 2); stroke(BALLOON_BASKET[0]*0.7, BALLOON_BASKET[1]*0.7, BALLOON_BASKET[2]*0.7, 180); strokeWeight(1); for(let i = 1; i < 4; i++){ line(basketCenterX - this.basketSize.w/2, basketTopY + i * (this.basketSize.h/4), basketCenterX + this.basketSize.w/2, basketTopY + i*(this.basketSize.h/4)); } for(let i = 1; i < 5; i++){ line(basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketTopY, basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketBottomY); } noStroke(); let numPanels = BALLOON_COLORS.length * 2; for (let i = 0; i < numPanels; i++) { fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); arc(0, 0, this.visualRadius * 2.1, this.visualRadius * 2.3, i * (360.0 / numPanels) - 90 - (360.0/numPanels)*0.1, (i + 1) * (360.0 / numPanels) - 90 + (360.0/numPanels)*0.1, PIE); } noFill(); stroke(255, 255, 255, 30); strokeWeight(this.visualRadius * 0.5); arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, -150, -30); stroke(0, 0, 0, 40); strokeWeight(this.visualRadius * 0.6); arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, 30, 150); pop(); noStroke(); }
+    hit() { if (!this.isAlive) return; this.isAlive = false; this.respawnTimer = BALLOON_RESPAWN_FRAMES; createExplosion(this.pos.x, this.pos.y, 25, EXPLOSION_COLORS.slice(0, 3).concat([BALLOON_BASKET])); let powerUpType = random(POWERUP_TYPES); let newPowerUp = new PowerUp(this.pos.x, this.pos.y, powerUpType); powerUps.push(newPowerUp); if(audioStarted && soundNodesStarted && powerUpSpawnSound && explosionNoise) { powerUpSpawnSound.play(explosionNoise); } }
+    respawn() { this.isAlive = true; this.basePos.x = random(width * 0.1, width * 0.9); this.basePos.y = random(height * 0.15, height * 0.55); this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.pos = this.basePos.copy(); this.position = this.pos; this.bobbleOffset = 0; }
  }
 
-// ==========================
-// --- Hot Air Balloon Class ---
-// ==========================
-class Balloon { constructor(x, y) { this.basePos = createVector(x, y); this.pos = this.basePos.copy(); this.bobbleOffset = 0; this.bobbleSpeed = 0.6; this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.radius = 30; this.visualRadius = 30; this.basketSize = { w: 25, h: 18 }; this.ropeLength = 25; this.isAlive = true; this.respawnTimer = 0; } update() { if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; } if (!this.isAlive) return; this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; this.basePos.x += this.driftSpeed; if (this.driftSpeed > 0 && this.basePos.x > width + this.visualRadius * 2) { this.basePos.x = -this.visualRadius * 2; } else if (this.driftSpeed < 0 && this.basePos.x < -this.visualRadius * 2) { this.basePos.x = width + this.visualRadius * 2; } this.pos.y = this.basePos.y + this.bobbleOffset; this.pos.x = this.basePos.x; } display() { if (this.respawnTimer > 0 && !this.isAlive) { if (floor(this.respawnTimer / 8) % 2 !== 0) { return; } } else if (!this.isAlive && this.respawnTimer <= 0) { return; } push(); translate(this.pos.x, this.pos.y); noStroke(); let basketTopY = this.visualRadius * 0.8 + this.ropeLength; let basketBottomY = basketTopY + this.basketSize.h; let basketCenterX = 0; stroke(BALLOON_ROPE); strokeWeight(1.5); line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.visualRadius * 0.5, this.visualRadius * 0.7); line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.visualRadius * 0.5, this.visualRadius * 0.7); line(basketCenterX, basketTopY - 3, 0, this.visualRadius * 0.8); fill(BALLOON_BASKET); rect(basketCenterX, basketTopY + this.basketSize.h / 2, this.basketSize.w, this.basketSize.h, 3); fill(BALLOON_BASKET[0]*0.8, BALLOON_BASKET[1]*0.8, BALLOON_BASKET[2]*0.8); rect(basketCenterX, basketTopY + 2, this.basketSize.w, 4, 2); stroke(BALLOON_BASKET[0]*0.7, BALLOON_BASKET[1]*0.7, BALLOON_BASKET[2]*0.7, 180); strokeWeight(1); for(let i = 1; i < 4; i++){ line(basketCenterX - this.basketSize.w/2, basketTopY + i * (this.basketSize.h/4), basketCenterX + this.basketSize.w/2, basketTopY + i*(this.basketSize.h/4)); } for(let i = 1; i < 5; i++){ line(basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketTopY, basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketBottomY); } noStroke(); let numPanels = BALLOON_COLORS.length * 2; for (let i = 0; i < numPanels; i++) { fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); arc(0, 0, this.visualRadius * 2.1, this.visualRadius * 2.3, i * (360.0 / numPanels) - 90 - (360.0/numPanels)*0.1, (i + 1) * (360.0 / numPanels) - 90 + (360.0/numPanels)*0.1, PIE); } noFill(); stroke(255, 255, 255, 30); strokeWeight(this.visualRadius * 0.5); arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, -150, -30); stroke(0, 0, 0, 40); strokeWeight(this.visualRadius * 0.6); arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, 30, 150); pop(); noStroke(); } hit() { if (!this.isAlive) return; console.log("Balloon HIT!"); this.isAlive = false; this.respawnTimer = BALLOON_RESPAWN_FRAMES; createExplosion(this.pos.x, this.pos.y, 25, EXPLOSION_COLORS.slice(0, 3).concat([BALLOON_BASKET])); let powerUpType = random(POWERUP_TYPES); let newPowerUp = new PowerUp(this.pos.x, this.pos.y, powerUpType); powerUps.push(newPowerUp); console.log(`Balloon dropped ${powerUpType}`); if(audioStarted && soundNodesStarted) { powerUpSpawnSound.play(explosionNoise); } } respawn() { this.isAlive = true; this.basePos.x = random(width * 0.1, width * 0.9); this.basePos.y = random(height * 0.15, height * 0.55); this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.pos = this.basePos.copy(); this.bobbleOffset = 0; console.log("Balloon Respawned at", this.basePos.x.toFixed(0), this.basePos.y.toFixed(0)); } checkCollision(bullet) { if (!this.isAlive) return false; let distance = dist(this.pos.x, this.pos.y, bullet.position.x, bullet.position.y); return distance < this.radius + bullet.size / 2; } }
-
 // =======================
-// --- Particle Class ---
+// --- Particle Class --- (Unchanged)
 // =======================
  class Particle { constructor(x, y, baseColor) { this.pos = createVector(x, y); let angle = random(360); let speed = random(1, 5); this.vel = p5.Vector.fromAngle(radians(angle), speed); this.vel.y += random(-0.5, 0.5); this.lifespan = random(30, 70); this.baseColor = color(baseColor); this.size = random(4, 12); this.decay = random(0.88, 0.96); this.gravity = 0.05; } update() { this.pos.add(this.vel); this.vel.mult(0.95); this.vel.y += this.gravity; this.lifespan -= 1; this.size *= this.decay; } display() { push(); noStroke(); let currentAlpha = map(this.lifespan, 0, 50, 0, alpha(this.baseColor)); fill(red(this.baseColor), green(this.baseColor), blue(this.baseColor), max(0, currentAlpha)); ellipse(this.pos.x, this.pos.y, this.size, this.size); pop(); } isDead() { return this.lifespan <= 0 || this.size < 1; } }
 
+// ==============================
+// --- RainbowParticle Class --- (Unchanged)
+// ==============================
+class RainbowParticle { constructor(x, y, assignedColor) { this.pos = createVector(x, y); this.vel = p5.Vector.random2D().mult(random(0.1, 0.4)); this.vel.y -= random(0.05, 0.15); this.lifespan = RAINBOW_TRAIL_PARTICLE_LIFESPAN; this.initialLifespan = this.lifespan; this.baseColor = color(assignedColor); this.size = random(3, 7); this.gravity = 0.01; } update() { this.pos.add(this.vel); this.vel.mult(0.97); this.vel.y += this.gravity; this.lifespan -= 1; } display() { push(); noStroke(); let currentAlpha = map(this.lifespan, 0, this.initialLifespan, 0, alpha(this.baseColor)); let shimmer = sin(frameCount * 5 + this.pos.x * 0.1) * 0.1 + 0.95; fill(red(this.baseColor) * shimmer, green(this.baseColor) * shimmer, blue(this.baseColor) * shimmer, max(0, currentAlpha)); ellipse(this.pos.x, this.pos.y, this.size, this.size); pop(); } isDead() { return this.lifespan <= 0; } }
+
 // ===============================================
-// --- Helper Function to Create Explosions ---
+// --- Helper Function to Create Explosions --- (Unchanged)
 // ===============================================
- function createExplosion(x, y, count, colors, isBomb = false) {
-     if (audioStarted && soundNodesStarted) {
-         if (isBomb) {
-             bombExplosionSoundEnv.play(bombExplosionNoise);
-         } else {
-             explosionSoundEnv.play(explosionNoise);
-         }
-     }
-     if (particles.length > MAX_PARTICLES) return;
-     for (let i = 0; i < count; i++) { let chosenColor = random(colors); if (particles.length < MAX_PARTICLES) { particles.push(new Particle(x, y, chosenColor)); } else { break; } }
- }
+ function createExplosion(x, y, count, colors, isBomb = false) { if (audioStarted && soundNodesStarted) { if (isBomb && bombExplosionSoundEnv && bombExplosionNoise) { bombExplosionSoundEnv.play(bombExplosionNoise); } else if (!isBomb && explosionSoundEnv && explosionNoise) { explosionSoundEnv.play(explosionNoise); } } if (particles.length > MAX_PARTICLES) return; for (let i = 0; i < count; i++) { let chosenColor = random(colors); if (particles.length < MAX_PARTICLES) { particles.push(new Particle(x, y, chosenColor)); } else { break; } } }
 
 // ==========================
-// --- PowerUp Class ---
+// --- PowerUp Class --- (Removed Shrink/Grow display)
 // ==========================
 class PowerUp { constructor(x, y, type) { this.position = createVector(x, y); this.velocity = createVector(random(-0.5, 0.5), POWERUP_FALL_SPEED); this.type = type; this.color = color(POWERUP_COLORS[type] || [255, 255, 255]); this.size = POWERUP_SIZE; this.lifespan = POWERUP_DURATION_FRAMES * 1.5; this.rotation = 0; this.rotationSpeed = random(-2, 2); }
     update() { this.position.add(this.velocity); this.velocity.y += GRAVITY_FORCE * 0.2; this.velocity.mult(0.99); this.lifespan--; this.rotation += this.rotationSpeed; if (this.position.y > GROUND_Y - this.size / 2) { this.position.y = GROUND_Y - this.size / 2; this.velocity.y *= -0.4; this.velocity.x *= 0.8; } }
-    display() { push(); translate(this.position.x, this.position.y); rotate(this.rotation); stroke(0); strokeWeight(2); fill(this.color);
-        if (this.type === 'RapidFire') { for (let i = 0; i < 4; i++) { rect(0, 0, this.size * 0.3, this.size * 0.8, 2); rotate(45); } fill(255,255,255); noStroke(); ellipse(0,0, this.size*0.3, this.size*0.3); }
-        else if (this.type === 'SpeedBoost') { beginShape(); vertex(0, -this.size * 0.6); vertex(this.size * 0.5, 0); vertex(0, this.size * 0.2); vertex(-this.size * 0.5, 0); endShape(CLOSE); stroke(255,255,255, 150); strokeWeight(1.5); line(0, -this.size*0.2, 0, this.size*0.5); line(-this.size*0.2, this.size*0.1, -this.size*0.2, this.size*0.6); line(this.size*0.2, this.size*0.1, this.size*0.2, this.size*0.6); }
-        else if (this.type === 'Shield') { ellipse(0, 0, this.size, this.size); fill(255, 255, 255, 180); noStroke(); ellipse(0, 0, this.size * 0.6, this.size * 0.6); }
-        else if (this.type === 'TripleShot') { let w = this.size * 0.2; let h = this.size * 0.5; let spacing = w * 1.5; rect(-spacing, 0, w, h, 1); rect(0, 0, w, h, 1); rect(spacing, 0, w, h, 1); }
-        else if (this.type === 'Bomb') { ellipse(0, 0, this.size, this.size); fill(0); noStroke(); ellipse(0, 0, this.size*1.05, this.size*1.05); fill(this.color); ellipse(0, 0, this.size, this.size); stroke(255, 200, 0); strokeWeight(2.5); noFill(); arc(0, -this.size * 0.4, this.size*0.4, this.size*0.4, 180, 300); fill(255, 50, 0); noStroke(); ellipse(this.size*0.2*cos(300), -this.size*0.4 + this.size*0.2*sin(300), 4, 4); }
-        else { rect(0, 0, this.size, this.size); }
+    display() { push(); translate(this.position.x, this.position.y); rotate(this.rotation); stroke(0); strokeWeight(2); fill(this.color); let s = this.size;
+        if (this.type === 'RapidFire') { for (let i = 0; i < 4; i++) { rect(0, 0, s * 0.3, s * 0.8, 2); rotate(45); } fill(255,255,255); noStroke(); ellipse(0,0, s*0.3, s*0.3); }
+        else if (this.type === 'SpeedBoost') { beginShape(); vertex(0, -s * 0.6); vertex(s * 0.5, 0); vertex(0, s * 0.2); vertex(-s * 0.5, 0); endShape(CLOSE); stroke(255,255,255, 150); strokeWeight(1.5); line(0, -s*0.2, 0, s*0.5); line(-s*0.2, s*0.1, -s*0.2, s*0.6); line(s*0.2, s*0.1, s*0.2, s*0.6); }
+        else if (this.type === 'Shield') { ellipse(0, 0, s, s); fill(255, 255, 255, 180); noStroke(); ellipse(0, 0, s * 0.6, s * 0.6); }
+        else if (this.type === 'TripleShot') { let w = s * 0.2; let h = s * 0.5; let spacing = w * 1.5; rect(-spacing, 0, w, h, 1); rect(0, 0, w, h, 1); rect(spacing, 0, w, h, 1); }
+        else if (this.type === 'Bomb') { ellipse(0, 0, s, s); fill(0); noStroke(); ellipse(0, 0, s*1.05, s*1.05); fill(this.color); ellipse(0, 0, s, s); stroke(255, 200, 0); strokeWeight(2.5); noFill(); arc(0, -s * 0.4, s*0.4, s*0.4, 180, 300); fill(255, 50, 0); noStroke(); ellipse(s*0.2*cos(300), -s*0.4 + s*0.2*sin(300), 4, 4); }
+        else if (this.type === 'Trampoline') { noFill(); strokeWeight(3); arc(0, s*0.1, s*0.8, s*0.6, 180, 360); line(-s*0.4, s*0.1, -s*0.5, s*0.4); line(s*0.4, s*0.1, s*0.5, s*0.4); line(-s*0.5, s*0.4, s*0.5, s*0.4); }
+        else if (this.type === 'ChickenLauncher') { fill(CHICKEN_BODY_COLOR); ellipse(0, s*0.1, s*0.8, s*0.6); ellipse(s*0.3, -s*0.1, s*0.4, s*0.3); fill(CHICKEN_ACCENT_COLOR); rect(s*0.25, -s*0.3, s*0.15, s*0.1, 1); }
+        else if (this.type === 'BubbleGun') { ellipse(0, 0, s, s); noFill(); stroke(255, 255, 255, 150); strokeWeight(1.5); arc(-s*0.2, -s*0.2, s*0.5, s*0.5, 150, 300); }
+        else if (this.type === 'ReverseGun') { beginShape(); vertex(s*0.4, 0); vertex(-s*0.1, -s*0.3); vertex(-s*0.1, s*0.3); endShape(CLOSE); rect(-s*0.3, 0, s*0.3, s*0.2); }
+        else if (this.type === 'RainbowTrail') { noFill(); strokeWeight(s * 0.15); for(let i=0; i<RAINBOW_COLORS.length; i++) { stroke(RAINBOW_COLORS[i]); arc(0,0, s*0.8, s*0.8, -90 + i*(180/RAINBOW_COLORS.length), -90 + (i+1)*(180/RAINBOW_COLORS.length)); } }
+        else { rect(0, 0, s, s); } // Default box
         pop(); noStroke(); }
     isOffscreen() { return this.lifespan <= 0 || this.position.y > height + this.size * 2; }
-    checkCollision(plane) { if (!plane.isAlive || plane.respawnTimer > 0) return false; let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < plane.size * 0.8 + this.size / 2; }
+    checkCollision(plane) { // Uses fixed plane.size
+        if (!plane || !plane.isAlive || plane.respawnTimer > 0 || typeof plane.size === 'undefined' || typeof plane.position === 'undefined') return false;
+        let distanceSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2;
+        let radiiSq = (plane.size * 0.8 + this.size / 2)**2; // Use fixed plane size
+        return distanceSq < radiiSq;
+    }
 }
 
+
 // ==========================
-// --- Bomb Class ---
+// --- Bomb Class --- (Uses fixed plane.size in checks)
 // ==========================
 class Bomb {
-    constructor(x, y, ownerId, planeVelocity) {
-        this.position = createVector(x, y);
-        this.velocity = planeVelocity.copy().mult(0.5);
-        this.velocity.y += BOMB_DROP_VELOCITY_Y;
-        this.ownerId = ownerId; this.size = 12; this.fuseTimer = BOMB_FUSE_FRAMES;
-        this.rotation = random(360); this.rotationSpeed = random(-1, 1) * (this.velocity.x > 0 ? 1 : -1);
-    }
+    constructor(x, y, ownerId, planeVelocity) { this.position = createVector(x, y); this.velocity = planeVelocity.copy().mult(0.5); this.velocity.y += BOMB_DROP_VELOCITY_Y; this.ownerId = ownerId; this.size = 12; this.fuseTimer = BOMB_FUSE_FRAMES; this.rotation = random(360); this.rotationSpeed = random(-1, 1) * (this.velocity.x > 0 ? 1 : -1); }
     update() { this.position.add(this.velocity); this.velocity.y += GRAVITY_FORCE * 1.5; this.velocity.mult(0.985); this.fuseTimer--; this.rotation += this.rotationSpeed; }
     display() { push(); translate(this.position.x, this.position.y); rotate(this.rotation); fill(50); stroke(80); strokeWeight(1); ellipse(0, 0, this.size * 1.2, this.size); fill(90); noStroke(); triangle(-this.size * 0.6, 0, -this.size * 0.9, -this.size * 0.3, -this.size * 0.9, this.size * 0.3); if (floor(this.fuseTimer / max(5, this.fuseTimer * 0.2)) % 2 === 0) { fill(255, 50 + (BOMB_FUSE_FRAMES - this.fuseTimer)*2, 0); ellipse(this.size * 0.5, 0, 4, 4); } pop(); noStroke(); }
-
-    explode(hutObj) { // Accept hut object
-        console.log("Bomb Exploded!");
-        createExplosion(this.position.x, this.position.y, BOMB_EXPLOSION_PARTICLES, BOMB_EXPLOSION_COLORS, true); // Base explosion
-
-        // Plane Collision Check
-        let p1Dist = dist(this.position.x, this.position.y, plane1.position.x, plane1.position.y);
-        let p2Dist = dist(this.position.x, this.position.y, plane2.position.x, plane2.position.y);
-        if (plane1.isAlive && p1Dist < BOMB_EXPLOSION_RADIUS + plane1.size * 0.5) {
-            console.log("Bomb hit Plane 1!");
-            let hitSuccess = plane1.hit(true, this); // Hit caused by Bomb (pass bomb as 'bullet' context)
-            if (hitSuccess && this.ownerId !== plane1.id) { score2++; console.log("Bomb! Point P2");}
-        }
-        if (plane2.isAlive && p2Dist < BOMB_EXPLOSION_RADIUS + plane2.size * 0.5) {
-            console.log("Bomb hit Plane 2!");
-            let hitSuccess = plane2.hit(true, this); // Hit caused by Bomb
-            if (hitSuccess && this.ownerId !== plane2.id) { score1++; console.log("Bomb! Point P1"); }
-        }
-
-        // Hut Destruction/Damage Check
-        if (hutObj) { // Make sure hut object exists
-             let hutDist = dist(this.position.x, this.position.y, hutObj.x, hutObj.y);
-             let collisionThresholdHut = BOMB_EXPLOSION_RADIUS + max(hutObj.w, hutObj.h) * 0.5; // Collision radius check
-
-             if (!hutObj.destroyed && hutDist < collisionThresholdHut) {
-                 // Destroy the hut - call the helper function
-                 destroyHut(hutObj);
-             } else if (hutObj.destroyed && hutDist < collisionThresholdHut) {
-                 // Optional: Smaller effect if bomb hits existing rubble
-                 // console.log("Bomb hit hut rubble!");
-                 createExplosion(this.position.x, this.position.y, 10, HUT_RUBBLE_COLORS, true);
-             }
-        }
-    }
-
-     checkCollision(plane) { if (!plane.isAlive || plane.respawnTimer > 0) return false; let distance = dist(this.position.x, this.position.y, plane.position.x, plane.position.y); return distance < plane.size * 0.7 + this.size / 2; }
-
-     // Updated checkCollisionHut to accept the hut object
-     checkCollisionHut(hutObj) {
-        if (!hutObj || hutObj.destroyed) return false; // Check if hut exists and is not destroyed
-        return (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2);
-     }
-
-     checkCollisionGround() { return this.position.y >= GROUND_Y - this.size / 2; }
+    explode(hutObj) { createExplosion(this.position.x, this.position.y, BOMB_EXPLOSION_PARTICLES, BOMB_EXPLOSION_COLORS, true);
+        for (let plane of [plane1, plane2]) { if (plane.isAlive && typeof plane.size !== 'undefined' && typeof plane.position !== 'undefined') { let distSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2; let radiusSq = (BOMB_EXPLOSION_RADIUS + plane.size * 0.5)**2; if (distSq < radiusSq) { let hitSuccess = plane.hit(true, null); if (hitSuccess && this.ownerId !== plane.id) { if (plane.id === 1) { score2++; } else { score1++; } } } } }
+        if (hutObj && typeof hutObj.x !== 'undefined') { let hutDistSq = (this.position.x - hutObj.x)**2 + (this.position.y - hutObj.y)**2; let collisionThresholdHut = BOMB_EXPLOSION_RADIUS + max(hutObj.w, hutObj.h) * 0.5; if (!hutObj.destroyed && hutDistSq < collisionThresholdHut * collisionThresholdHut) { destroyHut(hutObj); } else if (hutObj.destroyed && hutDistSq < collisionThresholdHut * collisionThresholdHut) { createExplosion(this.position.x, this.position.y, 10, HUT_RUBBLE_COLORS, true); } } }
+    checkCollision(plane) { if (!plane || !plane.isAlive || plane.respawnTimer > 0 || typeof plane.size === 'undefined' || typeof plane.position === 'undefined') return false; let distanceSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2; let radiiSq = (plane.size * 0.7 + this.size / 2)**2; return distanceSq < radiiSq; } // Use fixed plane.size
+    checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; return (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2); }
+    checkCollisionGround() { return this.position.y >= GROUND_Y - this.size / 2; }
     isOffscreen() { return (this.fuseTimer < -300 && (this.position.y > height + this.size * 5 || this.position.x < -width || this.position.x > width*2)); }
 }
 
 // ===============================
-// --- RainDrop Class ---
+// --- RainDrop Class --- (Unchanged)
 // ===============================
-class RainDrop {
-    constructor() { this.reset(); }
-    reset() { this.z = random(0.2, 1); this.pos = createVector(random(width * 1.2), random(-height * 0.5, -20)); this.len = map(this.z, 0.2, 1, 4, 12); this.ySpeed = map(this.z, 0.2, 1, 4, 10); this.vel = createVector(0, this.ySpeed); }
-    update() { this.pos.add(this.vel); if (this.pos.y > GROUND_Y + this.len) { this.reset(); } }
-    display() { push(); let alpha = map(this.z, 0.2, 1, 80, 200); let weight = map(this.z, 0.2, 1, 0.5, 1.5); stroke(RAINDROP_COLOR[0], RAINDROP_COLOR[1], RAINDROP_COLOR[2], alpha); strokeWeight(weight); line(this.pos.x, this.pos.y, this.pos.x, this.pos.y + this.len); pop(); noStroke(); }
-}
-
+class RainDrop { constructor() { this.reset(); } reset() { this.z = random(0.2, 1); this.pos = createVector(random(width * 1.2), random(-height * 0.5, -20)); this.len = map(this.z, 0.2, 1, 4, 12); this.ySpeed = map(this.z, 0.2, 1, 4, 10); this.vel = createVector(0, this.ySpeed); } update() { this.pos.add(this.vel); if (this.pos.y > GROUND_Y + this.len) { this.reset(); } } display() { push(); let alpha = map(this.z, 0.2, 1, 80, 200); let weight = map(this.z, 0.2, 1, 0.5, 1.5); stroke(RAINDROP_COLOR[0], RAINDROP_COLOR[1], RAINDROP_COLOR[2], alpha); strokeWeight(weight); line(this.pos.x, this.pos.y, this.pos.x, this.pos.y + this.len); pop(); noStroke(); } }
 
 // --- END OF FILE sketch.js ---
