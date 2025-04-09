@@ -68,8 +68,8 @@ const HUT_DESTRUCTION_PARTICLES = 70;
 const HUT_RUBBLE_PIECES = 25;
 
 // --- WACKY POWERUP CONFIG ---
-const TRAMPOLINE_BOUNCE_FORCE = 2.0;
-const TRAMPOLINE_MAX_SPEED_THRESHOLD = 2.8; // Bounce happens below this speed
+const TRAMPOLINE_BOUNCE_FORCE = 4.0;
+const TRAMPOLINE_MAX_SPEED_THRESHOLD = 6;
 const CHICKEN_SPEED = 5;
 const CHICKEN_BOUNCE_FACTOR = 0.7;
 const CHICKEN_DAMAGE = 0;
@@ -836,7 +836,7 @@ class Plane {
         else if (this.activePowerUps['TripleShot']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.5; }
         else if (this.activePowerUps['Bomb']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 2.0; }
         else if (this.activePowerUps['ChickenLauncher']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.2; }
-        else if (this.activePowerUps['BubbleGun']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.8; }
+        else if (this.activePowerUps['BubbleGun']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.1; }
         // ReverseGun doesn't change cooldown itself but fires extra shot
 
         if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
