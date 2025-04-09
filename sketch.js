@@ -316,8 +316,8 @@ function draw() {
 
     // --- UI ---
     drawUI();
-    displayPowerUpStatus(plane1, 20, height - 70, width * 0.4); // Display P1 powerups on left
-    displayPowerUpStatus(plane2, width - 20, height - 70, width * 0.4, true); // Display P2 powerups on right
+    displayPowerUpStatus(plane1, 20, height - 100, width * 0.4); // Display P1 powerups on left
+    displayPowerUpStatus(plane2, width - 20, height - 100, width * 0.4, true); // Display P2 powerups on right
 }
 
 // --- Draw Intro Screen --- (Unchanged)
@@ -387,9 +387,20 @@ function displayPowerUpStatus(plane, x, y, maxWidth, alignRight = false) {
             else if (type === 'ChickenLauncher') { ellipse(0,0, POWERUP_SIZE*0.7, POWERUP_SIZE*0.5);}
             else if (type === 'BubbleGun') { ellipse(0, 0, POWERUP_SIZE, POWERUP_SIZE); noFill(); stroke(255,150); arc(0,0, POWERUP_SIZE*0.6, POWERUP_SIZE*0.6, 90, 270);}
             else if (type === 'ReverseGun') { triangle(POWERUP_SIZE*0.4, 0, -POWERUP_SIZE*0.4, -POWERUP_SIZE*0.3, -POWERUP_SIZE*0.4, POWERUP_SIZE*0.3);}
-            else if (type === 'RainbowTrail') { noFill(); for(let i=0; i<3; i++){stroke(random(RAINBOW_COLORS)); arc(0,0, POWERUP_SIZE*0.8, POWERUP_SIZE*0.8, i*60, (i+1)*60);} }
-            else { rect(0,0, POWERUP_SIZE, POWERUP_SIZE); } // Default
-            pop();
+            else if (type === 'RainbowTrail') {
+    noFill();
+    strokeWeight(2); // Ensure consistent stroke weight
+    let arcRad = POWERUP_SIZE * 0.8;
+    let numArcs = 3; // Draw 3 arcs for simplicity
+    for(let i = 0; i < numArcs; i++){
+        stroke(RAINBOW_COLORS[i % RAINBOW_COLORS.length]); // Use fixed colors from the array
+        arc(0, 0, arcRad, arcRad, i * (180 / numArcs) - 90, (i + 1) * (180 / numArcs) - 90); // Draw semicircular arcs
+    }
+    stroke(0); // Reset stroke for timer bar later
+    strokeWeight(1); // Reset stroke weight
+}
+else { rect(0,0, POWERUP_SIZE, POWERUP_SIZE); } // Default
+pop();
 
             // Draw Timer Bar below icon
             let barWidth = iconSize;
