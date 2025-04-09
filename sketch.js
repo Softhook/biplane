@@ -467,10 +467,21 @@ class Plane {
     applyForce(force) { this.velocity.add(force); }
 
     update() {
-        if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; }
-        if (!this.isAlive) { if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05); return; }
+        if (this.respawnTimer > 0) {
+            this.respawnTimer--;
+            if (this.respawnTimer <= 0) {
+                this.respawn();
+            }
+            return; // Exit early if respawning
+        }
+        if (!this.isAlive) {
+            if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0.05);
+            return; // Exit early if dead
+        }
 
-        if (this.shootCooldown > 0) { this.shootCooldown--; }
+        if (this.shootCooldown > 0) {
+            this.shootCooldown--;
+        }
 
         // --- PowerUp Timer Update ---
         for (const type in this.activePowerUps) {
@@ -486,88 +497,305 @@ class Plane {
         // --- Bubble State Update ---
         if (this.isBubbled) {
              this.bubbleTimer--;
-             if (this.bubbleTimer <= 0) { this.isBubbled = false; this.velocity.y -= 0.5; }
-             else { this.applyForce(createVector(0, -BUBBLE_FLOAT_FORCE)); this.velocity.mult(0.96); this.angle += sin(frameCount * 3 + this.id) * 0.5; }
+             if (this.bubbleTimer <= 0) {
+                 this.isBubbled = false;
+                 this.velocity.y -= 0.5; // Small downward pop when bubble breaks
+             }
+             else {
+                 // Apply bubble physics
+                 this.applyForce(createVector(0, -BUBBLE_FLOAT_FORCE));
+                 this.velocity.mult(0.96); // Dampen velocity in bubble
+                 this.angle += sin(frameCount * 3 + this.id) * 0.5; // Wobble angle
+             }
+             // Skip regular movement and physics updates while bubbled
         }
 
-        // --- Ground Check Y (fixed size) ---
+        // --- Ground Check Y (using fixed size) ---
         let groundCheckY = GROUND_Y - (this.size * 0.8);
 
         // --- Movement controls only if NOT bubbled ---
-        if (!this.isBubbled) { if (this.isTurningLeft) { this.angle -= TURN_SPEED; } if (this.isTurningRight) { this.angle += TURN_SPEED; } }
+        if (!this.isBubbled) {
+            if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
+            if (this.isTurningRight) { this.angle += TURN_SPEED; }
+        }
 
-        // --- Stall Check ---
-        let verticalPointing = sin(this.angle); const STALL_ENTRY_SIN_THRESHOLD = sin(STALL_ANGLE_THRESHOLD); const STALL_RECOVERY_SIN_THRESHOLD = sin(STALL_RECOVERY_ANGLE);
-        if (!this.isOnGround && !this.isBubbled) { if (!this.isStalled) { if (verticalPointing < STALL_ENTRY_SIN_THRESHOLD) { this.isStalled = true; } } else { if (verticalPointing > STALL_RECOVERY_SIN_THRESHOLD) { this.isStalled = false; } } }
-        else { if (this.isStalled) { this.isStalled = false; } }
+        // --- Stall Check (only if not grounded and not bubbled)---
+        let verticalPointing = sin(this.angle);
+        const STALL_ENTRY_SIN_THRESHOLD = sin(STALL_ANGLE_THRESHOLD);
+        const STALL_RECOVERY_SIN_THRESHOLD = sin(STALL_RECOVERY_ANGLE);
 
-        // --- Forces ---
-        let thrustVector = createVector(0, 0); let currentThrustForce = THRUST_FORCE;
-        if (this.activePowerUps['SpeedBoost']) { currentThrustForce *= 1.6; } // Check specific powerup
-        if (this.isStalled) { currentThrustForce *= STALL_EFFECT_FACTOR; }
-        if (this.isThrusting && !this.isBubbled) { thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce); }
+        if (!this.isOnGround && !this.isBubbled) {
+            if (!this.isStalled) {
+                if (verticalPointing < STALL_ENTRY_SIN_THRESHOLD) {
+                    this.isStalled = true;
+                }
+            } else { // Is currently stalled
+                if (verticalPointing > STALL_RECOVERY_SIN_THRESHOLD) {
+                    this.isStalled = false; // Recovered from stall
+                }
+            }
+        } else { // On ground or bubbled
+            if (this.isStalled) {
+                this.isStalled = false; // Instantly recover stall state on ground/bubble
+            }
+        }
+
+        // --- Calculate Forces (only if not bubbled) ---
+        let thrustVector = createVector(0, 0);
+        let currentThrustForce = THRUST_FORCE;
+        if (!this.isBubbled) {
+            if (this.activePowerUps['SpeedBoost']) {
+                currentThrustForce *= 1.6; // Apply SpeedBoost multiplier
+            }
+            if (this.isStalled) {
+                currentThrustForce *= STALL_EFFECT_FACTOR; // Reduce thrust if stalled
+            }
+            if (this.isThrusting) { // Calculate thrust vector if thrusting key is pressed
+                thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce);
+            }
+        }
 
         // --- Physics: Grounded vs Airborne ---
         if (this.isOnGround) {
-            this.velocity.x *= GROUND_FRICTION; let normAngle = (this.angle % 360 + 360) % 360; const TAKEOFF_MIN_ANGLE_P1 = -10; const TAKEOFF_MAX_ANGLE_P1 = -85; const TAKEOFF_MIN_ANGLE_P2 = 190; const TAKEOFF_MAX_ANGLE_P2 = 265; let isAngledForTakeoff = (this.id === 1) ? (this.angle < TAKEOFF_MIN_ANGLE_P1 && this.angle > TAKEOFF_MAX_ANGLE_P1) : (normAngle > TAKEOFF_MIN_ANGLE_P2 && normAngle < TAKEOFF_MAX_ANGLE_P2);
-            if (this.isThrusting && !this.isBubbled) { if (isAngledForTakeoff) { this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15)); } else { this.applyForce(createVector(thrustVector.x, 0)); } }
-            if (!this.isThrusting || !isAngledForTakeoff || this.isBubbled) { this.applyForce(createVector(0, GRAVITY_FORCE * 2)); } else { this.applyForce(createVector(0, GRAVITY_FORCE * 0.5)); }
-            if (this.position.y > groundCheckY) { this.position.y = groundCheckY; if(this.velocity.y > 0) this.velocity.y = 0; }
-            let horizontalSpeed = abs(this.velocity.x); if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED && !this.isBubbled) { this.isOnGround = false; this.isStalled = false; this.velocity.y -= currentThrustForce * 3.0; }
+            // --- Grounded Physics ---
+            this.velocity.x *= GROUND_FRICTION; // Apply ground friction to horizontal speed
+
+            // Determine if angled for takeoff (for applying thrust/gravity correctly)
+            let normAngle = (this.angle % 360 + 360) % 360; // Normalized angle 0-360
+            const TAKEOFF_MIN_ANGLE_P1 = -10;
+            const TAKEOFF_MAX_ANGLE_P1 = -85;
+            const TAKEOFF_MIN_ANGLE_P2 = 190;
+            const TAKEOFF_MAX_ANGLE_P2 = 265;
+            let isAngledForTakeoff = (this.id === 1)
+                ? (this.angle < TAKEOFF_MIN_ANGLE_P1 && this.angle > TAKEOFF_MAX_ANGLE_P1)
+                : (normAngle > TAKEOFF_MIN_ANGLE_P2 && normAngle < TAKEOFF_MAX_ANGLE_P2);
+
+            // --- Apply Thrust (if not bubbled) ---
+            if (this.isThrusting && !this.isBubbled) {
+                if (isAngledForTakeoff) {
+                    // Apply thrust with small upward component when angled correctly
+                    this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15));
+                } else {
+                    // Apply only horizontal thrust when not angled for takeoff (taxiing)
+                    this.applyForce(createVector(thrustVector.x, 0));
+                }
+            }
+
+            // --- Apply Gravity / Downward Force (Revised Logic) ---
+             if (this.isThrusting && !this.isBubbled && isAngledForTakeoff) {
+                 // Reduced gravity when actively trying to take off (angled correctly)
+                this.applyForce(createVector(0, GRAVITY_FORCE * 0.7));
+            } else if (this.isThrusting && !this.isBubbled && !isAngledForTakeoff) {
+                // Normal gravity when thrusting but not angled for takeoff (taxiing)
+                // IMPORTANT FIX: Prevents being pinned down by extra gravity just for thrusting flat.
+                this.applyForce(createVector(0, GRAVITY_FORCE * 1.0));
+            }
+             else { // Not thrusting, or bubbled on ground
+                // Stronger gravity when idle on ground
+                this.applyForce(createVector(0, GRAVITY_FORCE * 2.0));
+            }
+
+            // --- Ground Clamping ---
+            // Ensure plane stays exactly on the ground level if it goes slightly below
+            if (this.position.y > groundCheckY) {
+                this.position.y = groundCheckY;
+                if(this.velocity.y > 0) this.velocity.y = 0; // Stop downward velocity if clamping
+            }
+
+            // --- Takeoff Transition ---
+            let horizontalSpeed = abs(this.velocity.x);
+            // Check all conditions: thrusting, angled correctly, speed met, not bubbled
+            if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED && !this.isBubbled) {
+                this.isOnGround = false; // Transition to airborne state
+                this.isStalled = false; // Ensure not stalled on takeoff
+                // Give an upward boost on takeoff
+                this.velocity.y -= currentThrustForce * 2.0; // Was 3.0, slightly reduced boost
+            }
+
         } else { // --- Airborne Physics ---
-            if (!this.isBubbled) {
-                this.applyForce(thrustVector); let speed = this.velocity.mag(); let liftMagnitude = speed * LIFT_FACTOR;
-                if (isCurrentlyRaining) { liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR; }
-                if (this.isStalled) { liftMagnitude *= STALL_EFFECT_FACTOR; }
-                this.applyForce(createVector(0, -liftMagnitude)); this.applyForce(createVector(0, GRAVITY_FORCE)); this.velocity.mult(DAMPING_FACTOR);
-            } else { this.applyForce(createVector(0, GRAVITY_FORCE * 0.3)); } // Bubble physics
+            if (!this.isBubbled) { // Apply normal airborne physics if not bubbled
+                this.applyForce(thrustVector); // Apply engine thrust
+
+                // Apply lift based on speed (reduced by rain or stall)
+                let speed = this.velocity.mag();
+                let liftMagnitude = speed * LIFT_FACTOR;
+                if (isCurrentlyRaining) {
+                    liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR;
+                }
+                if (this.isStalled) {
+                    liftMagnitude *= STALL_EFFECT_FACTOR;
+                }
+                this.applyForce(createVector(0, -liftMagnitude)); // Upward lift force
+
+                // Apply gravity
+                this.applyForce(createVector(0, GRAVITY_FORCE));
+
+                // Apply air drag
+                this.velocity.mult(DAMPING_FACTOR);
+
+            } else { // Bubbled in the air
+                 // Bubbles still affected slightly by gravity
+                 this.applyForce(createVector(0, GRAVITY_FORCE * 0.3));
+                 // Bubble floating force is applied earlier in the bubble state update
+            }
         }
 
-        // --- Update Position ---
-        this.position.add(this.velocity);
+        // --- Update Position (applies to both grounded and airborne) ---
+        // Only update position if not bubbled, bubble handles its own minimal movement
+        if (!this.isBubbled) {
+             this.position.add(this.velocity);
+        }
+
 
         // --- Landing / Ground Interaction (Post-Position Update) ---
+        // Check if plane crossed the ground threshold while airborne
         if (this.position.y >= groundCheckY && !this.isOnGround) {
-             let normAngle = (this.angle % 360 + 360) % 360; let isTooSteep = (normAngle > 45 && normAngle < 135) || (normAngle > 225 && normAngle < 315); let verticalSpeed = this.velocity.y;
+             let normAngle = (this.angle % 360 + 360) % 360;
+             // Check for steep angle (likely to crash)
+             let isTooSteep = (normAngle > 45 && normAngle < 135) || (normAngle > 225 && normAngle < 315);
+             let verticalSpeed = this.velocity.y; // Speed plane is hitting the ground
 
-             // --- TRAMPOLINE OVERRIDE ---
-             if (this.activePowerUps['Trampoline'] && verticalSpeed > 0 && !this.isBubbled) { // If trampoline active, always try to bounce
-                  if (verticalSpeed < TRAMPOLINE_MAX_SPEED_THRESHOLD) { // Bounce only if speed is low enough
-                     // console.log(`Plane ${this.id} bounced (Trampoline)! Speed: ${verticalSpeed.toFixed(2)}`);
-                      this.position.y = groundCheckY - 1; this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE; this.velocity.x *= 0.9; this.velocity.add(p5.Vector.random2D().mult(0.5));
-                      if (audioStarted && soundNodesStarted && boingSound && boingEnv) { boingSound.freq(random(300, 600)); boingEnv.play(boingSound); }
-                      this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.05); // Use up some powerup time faster
+             // --- TRAMPOLINE POWERUP OVERRIDE ---
+             if (this.activePowerUps['Trampoline'] && verticalSpeed > 0 && !this.isBubbled) {
+                  if (verticalSpeed < TRAMPOLINE_MAX_SPEED_THRESHOLD) { // Bounce only if speed is manageable
+                      this.position.y = groundCheckY - 1; // Move slightly above ground
+                      this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE; // Reverse and boost vertical velocity
+                      this.velocity.x *= 0.9; // Dampen horizontal speed slightly on bounce
+                      this.velocity.add(p5.Vector.random2D().mult(0.5)); // Add small random impulse
+                      if (audioStarted && soundNodesStarted && boingSound && boingEnv) {
+                          boingSound.freq(random(300, 600));
+                          boingEnv.play(boingSound);
+                      }
+                      // Use up some trampoline powerup time faster on bounce
+                      if(this.activePowerUps['Trampoline']) this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.05);
                   } else {
-                      // Land normally even with trampoline if speed is too high (prevent infinite bounce)
-                      this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0;
+                      // Land normally (don't bounce) even with trampoline if speed is too high
+                      this.isOnGround = true;
+                      this.isStalled = false;
+                      this.position.y = groundCheckY;
+                      this.velocity.y = 0; // Stop vertical velocity
+                      // Pop bubble if landing while bubbled (shouldn't happen with trampoline active, but good fallback)
                       if (this.isBubbled) { this.isBubbled = false; this.bubbleTimer = 0; if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound); }
                   }
              }
-             // --- REGULAR LANDING / CRASH CHECK (Only if Trampoline NOT active) ---
+             // --- REGULAR LANDING / CRASH CHECK (Only if Trampoline NOT active/used) ---
              else {
-                 if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && !this.activePowerUps['Shield'] && !this.isBubbled) { this.hit(true); return; } // CRASH
-                 else { // Safe landing or Shield absorb
-                     this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0;
-                     if (this.isBubbled) { this.isBubbled = false; this.bubbleTimer = 0; if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound); }
-                     if (this.activePowerUps['Shield'] && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) { if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.4); } // Use up shield faster
+                 // Crash condition: Too fast OR too steep, AND not shielded OR bubbled
+                 if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && !this.activePowerUps['Shield'] && !this.isBubbled) {
+                      this.hit(true); // CRASH! (true indicates crash/bomb hit)
+                      return; // Stop further updates this frame after crash
+                 }
+                 // Safe landing or Shield absorption
+                 else {
+                     this.isOnGround = true; // Landed safely
+                     this.isStalled = false; // Recover stall state
+                     this.position.y = groundCheckY; // Set position exactly to ground level
+                     this.velocity.y = 0; // Stop vertical velocity
+
+                     // Pop bubble if landing while bubbled
+                     if (this.isBubbled) {
+                         this.isBubbled = false;
+                         this.bubbleTimer = 0;
+                         if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound);
+                     }
+                     // Use up Shield faster if it absorbed a hard landing
+                     if (this.activePowerUps['Shield'] && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) {
+                         if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.4);
+                     }
                  }
              }
+        } // End of landing check
+
+        // --- Boundary Constraints (Screen Wrapping & Ceiling) ---
+        if (this.position.x > width + this.size) { this.position.x = -this.size; } // Wrap right to left
+        else if (this.position.x < -this.size) { this.position.x = width + this.size; } // Wrap left to right
+        if (this.position.y < this.size / 2) { // Ceiling boundary
+            this.position.y = this.size / 2;
+            if (this.velocity.y < 0) {
+                this.velocity.y = 0; // Stop upward velocity at ceiling
+            }
         }
 
-        // --- Boundary Constraints ---
-        if (this.position.x > width + this.size) { this.position.x = -this.size; } else if (this.position.x < -this.size) { this.position.x = width + this.size; } if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
-
         // --- Collisions (Hut, Balloon) if still alive ---
-        if (!this.isAlive) return;
-        if (this.checkCollisionHut(hut)) { if (!this.isAlive) return; } // Hit logic inside checkCollisionHut
-        if (balloon.isAlive) { let distanceSq = (this.position.x - balloon.pos.x)**2 + (this.position.y - balloon.pos.y)**2; let combinedRadiusSq = (this.size * 0.9 + balloon.radius)**2; if (distanceSq < combinedRadiusSq) { if (this.activePowerUps['Shield']) { balloon.hit(); if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2); } else if (!this.isBubbled) { this.hit(true); return; } } }
+        if (!this.isAlive) return; // Double check aliveness after potential crash
+
+        // Check Hut collision (hit logic might kill the plane, so check isAlive again after)
+        if (this.checkCollisionHut(hut)) {
+             if (!this.isAlive) return; // Exit if hut collision killed the plane
+        }
+
+        // Check Balloon collision
+        if (balloon.isAlive) {
+            let distanceSq = (this.position.x - balloon.pos.x)**2 + (this.position.y - balloon.pos.y)**2;
+            let combinedRadiusSq = (this.size * 0.9 + balloon.radius)**2; // Using fixed size
+            if (distanceSq < combinedRadiusSq) {
+                if (this.activePowerUps['Shield']) { // Shielded plane destroys balloon
+                    balloon.hit();
+                    // Use up shield faster on balloon collision
+                     if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2);
+                } else if (!this.isBubbled) { // Unshielded, non-bubbled plane crashes into balloon
+                    this.hit(true); // Crash!
+                    return; // Exit after crash
+                }
+                // Bubbled plane just bumps harmlessly (or shielded plane passes through after destroying)
+            }
+        }
 
         // --- Rainbow Trail Emission ---
-        if (this.activePowerUps['RainbowTrail'] && !this.isOnGround) { this.rainbowTrailCounter++; if (this.rainbowTrailCounter >= RAINBOW_TRAIL_PARTICLE_INTERVAL) { this.rainbowTrailCounter = 0; let trailColor = RAINBOW_COLORS[rainbowColorIndex % RAINBOW_COLORS.length]; let offset = p5.Vector.fromAngle(radians(this.angle + 180), this.size * 0.5); let spawnPos = p5.Vector.add(this.position, offset); if (particles.length < MAX_PARTICLES) { particles.push(new RainbowParticle(spawnPos.x, spawnPos.y, trailColor)); } rainbowColorIndex++; if (random() < 0.1 && audioStarted && soundNodesStarted && rainbowSparkleSound && rainbowEnv) { rainbowSparkleSound.freq(random(800, 1600)); rainbowEnv.play(rainbowSparkleSound); } } }
+        if (this.activePowerUps['RainbowTrail'] && !this.isOnGround && !this.isBubbled) {
+             this.rainbowTrailCounter++;
+             if (this.rainbowTrailCounter >= RAINBOW_TRAIL_PARTICLE_INTERVAL) {
+                 this.rainbowTrailCounter = 0;
+                 let trailColor = RAINBOW_COLORS[rainbowColorIndex % RAINBOW_COLORS.length];
+                 let offset = p5.Vector.fromAngle(radians(this.angle + 180), this.size * 0.5); // Emit from tail
+                 let spawnPos = p5.Vector.add(this.position, offset);
+                 if (particles.length < MAX_PARTICLES) {
+                     particles.push(new RainbowParticle(spawnPos.x, spawnPos.y, trailColor));
+                 }
+                 rainbowColorIndex++;
+                 // Play sparkle sound occasionally
+                 if (random() < 0.1 && audioStarted && soundNodesStarted && rainbowSparkleSound && rainbowEnv) {
+                     rainbowSparkleSound.freq(random(800, 1600));
+                     rainbowEnv.play(rainbowSparkleSound);
+                 }
+             }
+         }
 
-        // --- Engine Sound ---
-        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) { let speed = this.velocity.mag(); let targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true); let targetAmp = (this.isThrusting && !this.isBubbled) ? MAX_ENGINE_AMP : BASE_ENGINE_AMP; if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; } if (this.activePowerUps['SpeedBoost']) { targetFreq *= 1.1; targetAmp *= 1.1; } if (this.isBubbled) { targetAmp = BASE_ENGINE_AMP * 0.5; targetFreq = BASE_ENGINE_FREQ * 0.8; } this.engineSound.amp(targetAmp, 0.1); this.engineSound.freq(targetFreq, 0.1); }
-        else if (this.engineSound && this.engineSound.getAmp() > 0) { this.engineSound.amp(0, 0.1); }
+        // --- Engine Sound Update ---
+        if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) {
+            let targetFreq = BASE_ENGINE_FREQ;
+            let targetAmp = BASE_ENGINE_AMP;
+
+            if (!this.isBubbled) { // Normal engine sound logic
+                 let speed = this.velocity.mag();
+                 targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
+                 targetAmp = (this.isThrusting) ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
+
+                 if (this.isStalled) {
+                     targetAmp *= 0.5;
+                     targetFreq *= 0.8;
+                 }
+                 if (this.activePowerUps['SpeedBoost']) {
+                     targetFreq *= 1.1;
+                     targetAmp *= 1.1;
+                 }
+                 if (this.isOnGround && !this.isThrusting) {
+                    targetAmp = BASE_ENGINE_AMP * 0.5; // Quieter idle on ground
+                 }
+             } else { // Muffled sound when bubbled
+                 targetAmp = BASE_ENGINE_AMP * 0.5;
+                 targetFreq = BASE_ENGINE_FREQ * 0.8;
+             }
+
+            // Apply sound changes smoothly
+            this.engineSound.amp(targetAmp, 0.1);
+            this.engineSound.freq(targetFreq, 0.1);
+        }
+        else if (this.engineSound && this.engineSound.getAmp() > 0) {
+            // Fade out sound if dead or audio stopped
+            this.engineSound.amp(0, 0.1);
+        }
+
     } // --- End of update() ---
 
     display() {
