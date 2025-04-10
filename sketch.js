@@ -41,10 +41,11 @@ let clearTimer = 0;
 const POWERUP_DURATION_FRAMES = 60 * 30; // 30 Seconds
 const POWERUP_FALL_SPEED = 0.5;
 const POWERUP_SIZE = 30;
-// REMOVED ShrinkRay, GrowRay
+// ADDED CloudDisguise
 const POWERUP_TYPES = [
     'RapidFire', 'SpeedBoost', 'Shield', 'TripleShot', 'Bomb',
-    'Trampoline', 'ChickenLauncher', 'BubbleGun', 'ReverseGun', 'RainbowTrail'
+    'Trampoline', 'ChickenLauncher', 'BubbleGun', 'ReverseGun', 'RainbowTrail',
+    'CloudDisguise'
 ];
 const POWERUP_COLORS = {
     RapidFire: [255, 255, 0],   // Yellow
@@ -56,7 +57,8 @@ const POWERUP_COLORS = {
     ChickenLauncher: [255, 200, 150], // Peach
     BubbleGun: [150, 180, 255],   // Light Sky Blue
     ReverseGun: [255, 165, 0],    // Orange
-    RainbowTrail: [255, 0, 255]     // Temp Magenta (trail is rainbow)
+    RainbowTrail: [255, 0, 255],     // Temp Magenta (trail is rainbow)
+    CloudDisguise: [220, 220, 235] // Light Gray-Blue
 };
 const SHIELD_COLOR = [150, 150, 255, 100];
 const TRIPLE_SHOT_SPREAD_ANGLE = 6;
@@ -72,7 +74,7 @@ const TRAMPOLINE_BOUNCE_FORCE = 4.0;
 const TRAMPOLINE_MAX_SPEED_THRESHOLD = 6;
 const CHICKEN_SPEED = 5;
 const CHICKEN_BOUNCE_FACTOR = 0.7;
-const CHICKEN_DAMAGE = 0;
+// const CHICKEN_DAMAGE = 0; // Chickens are now lethal in their hitEffect
 const BUBBLE_SPEED = 2.5;
 const BUBBLE_TRAP_DURATION = 180;
 const BUBBLE_FLOAT_FORCE = 0.15;
@@ -80,6 +82,9 @@ const RAINBOW_TRAIL_PARTICLE_INTERVAL = 2;
 const RAINBOW_TRAIL_PARTICLE_LIFESPAN = 60;
 const RAINBOW_COLORS = [ [255, 0, 0], [255, 165, 0], [255, 255, 0], [0, 255, 0], [0, 0, 255], [75, 0, 130], [148, 0, 211] ];
 let rainbowColorIndex = 0;
+const CLOUD_DISGUISE_PUFF_COUNT = 5; // Number of puffs for disguise
+const CLOUD_DISGUISE_SIZE_FACTOR = 1.6; // How large the disguise cloud is relative to plane size
+const CLOUD_DISGUISE_OPACITY = 190; // Base opacity for disguise cloud
 
 // --- Sound Parameters ---
 const BASE_ENGINE_FREQ = 40;
@@ -112,8 +117,8 @@ let shootSoundEnv, shootNoise;
 let explosionSoundEnv, explosionNoise;
 let powerUpSpawnSound, powerUpCollectSound, shieldDeflectSound;
 let bombDropSound, bombExplosionSoundEnv, bombExplosionNoise;
-let boingSound, chickenSound, bubblePopSound, rainbowSparkleSound;
-let boingEnv, chickenEnv, bubbleEnv, rainbowEnv;
+let boingSound, chickenSound, bubblePopSound, rainbowSparkleSound, cloudPoofSound; // Added cloudPoofSound
+let boingEnv, chickenEnv, bubbleEnv, rainbowEnv, cloudPoofEnv; // Added cloudPoofEnv
 let audioStarted = false;
 let soundNodesStarted = false;
 
@@ -218,6 +223,11 @@ function setup() {
     rainbowSparkleSound = new p5.Oscillator('triangle'); rainbowSparkleSound.amp(0); rainbowSparkleSound.freq(1200);
     rainbowEnv = new p5.Envelope(); rainbowEnv.setADSR(0.005, 0.1, 0, 0.1); rainbowEnv.setRange(0.3, 0);
 
+    // Initialize Cloud Poof Sound
+    cloudPoofSound = new p5.Noise('white'); cloudPoofSound.amp(0);
+    cloudPoofEnv = new p5.Envelope(); cloudPoofEnv.setADSR(0.01, 0.15, 0.1, 0.2); cloudPoofEnv.setRange(0.4, 0);
+
+
     plane1.assignEngineSound(engineSound1);
     plane2.assignEngineSound(engineSound2);
 }
@@ -289,7 +299,7 @@ function draw() {
     plane2.handleInput(keys); plane2.update(); plane2.display();
 
     // --- Plane-Plane Collision ---
-    if (plane1.isAlive && plane2.isAlive && !plane1.activePowerUps['Shield'] && !plane2.activePowerUps['Shield']) {
+    if (plane1.isAlive && plane2.isAlive && !plane1.activePowerUps['Shield'] && !plane2.activePowerUps['Shield'] && !plane1.activePowerUps['CloudDisguise'] && !plane2.activePowerUps['CloudDisguise']) { // Cloud disguise does not prevent collision
         let distanceSq = (plane1.position.x - plane2.position.x)**2 + (plane1.position.y - plane2.position.y)**2;
         let collisionRadius = (plane1.size + plane2.size) * 0.5 * PLANE_COLLISION_THRESHOLD_FACTOR;
         if (distanceSq < collisionRadius * collisionRadius) {
@@ -327,7 +337,7 @@ function drawIntroScreen() { drawBackground(); drawEnvironment(); if (hut) { hut
 function keyPressed() {
     if (gameState === 'intro') {
         gameState = 'playing'; if (hut) { hut.destroyed = false; hut.rubbleDetails = null; }
-        if (audioStarted && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started via key press."); */ } catch (e) { console.error("Error starting sound nodes:", e); } }
+        if (audioStarted && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started via key press."); */ } catch (e) { console.error("Error starting sound nodes:", e); } }
         else if (!audioStarted) { /* console.log("Key pressed, waiting for audio context."); */ } return;
     } if (gameState === 'playing') { keys[keyCode] = true; }
 }
@@ -335,8 +345,8 @@ function keyReleased() { if (gameState === 'playing') { keys[keyCode] = false; }
 
 // --- Fullscreen & Audio Start ---
 function mousePressed() {
-  if (!audioStarted && getAudioContext().state !== 'running') { userStartAudio().then(() => { if (getAudioContext().state === 'running') { /* console.log("Audio Context running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (mouse press)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } } else { console.error("Audio context failed to resume."); } }).catch(e => { console.error("Error starting audio:", e); }); }
-  else if (!audioStarted && getAudioContext().state === 'running') { /* console.log("Audio Context already running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (pre-existing context)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } }
+  if (!audioStarted && getAudioContext().state !== 'running') { userStartAudio().then(() => { if (getAudioContext().state === 'running') { /* console.log("Audio Context running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (mouse press)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } } else { console.error("Audio context failed to resume."); } }).catch(e => { console.error("Error starting audio:", e); }); }
+  else if (!audioStarted && getAudioContext().state === 'running') { /* console.log("Audio Context already running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (pre-existing context)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } }
   if (mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) { let fs = fullscreen(); fullscreen(!fs); }
 }
 
@@ -368,17 +378,14 @@ function displayPowerUpStatus(plane, x, y, maxWidth, alignRight = false) {
     for (const type in plane.activePowerUps) {
         if (plane.activePowerUps.hasOwnProperty(type)) {
             let remainingFrames = plane.activePowerUps[type];
-            let remainingTime = ceil(remainingFrames / 60);
             let displayColor = POWERUP_COLORS[type] || [255, 255, 255];
 
             // Draw Icon
             push();
             translate(currentX + iconSize / 2, currentY + iconSize / 2);
-            // Maybe scale icons down slightly?
             scale(iconSize / POWERUP_SIZE);
-            // Draw a simplified icon (reusing PowerUp display logic is complex here)
             stroke(0); fill(displayColor);
-                 if (type === 'RapidFire') { rect(0,0, POWERUP_SIZE*0.6, POWERUP_SIZE*0.6, 3); }
+            if (type === 'RapidFire') { rect(0,0, POWERUP_SIZE*0.6, POWERUP_SIZE*0.6, 3); }
             else if (type === 'SpeedBoost') { triangle(0, -POWERUP_SIZE*0.4, -POWERUP_SIZE*0.4, POWERUP_SIZE*0.3, POWERUP_SIZE*0.4, POWERUP_SIZE*0.3); }
             else if (type === 'Shield') { ellipse(0,0, POWERUP_SIZE, POWERUP_SIZE); }
             else if (type === 'TripleShot') { rect(0,0, POWERUP_SIZE*0.2, POWERUP_SIZE*0.6); rect(-POWERUP_SIZE*0.3,0, POWERUP_SIZE*0.2, POWERUP_SIZE*0.6); rect(POWERUP_SIZE*0.3,0, POWERUP_SIZE*0.2, POWERUP_SIZE*0.6);}
@@ -388,19 +395,26 @@ function displayPowerUpStatus(plane, x, y, maxWidth, alignRight = false) {
             else if (type === 'BubbleGun') { ellipse(0, 0, POWERUP_SIZE, POWERUP_SIZE); noFill(); stroke(255,150); arc(0,0, POWERUP_SIZE*0.6, POWERUP_SIZE*0.6, 90, 270);}
             else if (type === 'ReverseGun') { triangle(POWERUP_SIZE*0.4, 0, -POWERUP_SIZE*0.4, -POWERUP_SIZE*0.3, -POWERUP_SIZE*0.4, POWERUP_SIZE*0.3);}
             else if (type === 'RainbowTrail') {
-    noFill();
-    strokeWeight(2); // Ensure consistent stroke weight
-    let arcRad = POWERUP_SIZE * 0.8;
-    let numArcs = 3; // Draw 3 arcs for simplicity
-    for(let i = 0; i < numArcs; i++){
-        stroke(RAINBOW_COLORS[i % RAINBOW_COLORS.length]); // Use fixed colors from the array
-        arc(0, 0, arcRad, arcRad, i * (180 / numArcs) - 90, (i + 1) * (180 / numArcs) - 90); // Draw semicircular arcs
-    }
-    stroke(0); // Reset stroke for timer bar later
-    strokeWeight(1); // Reset stroke weight
-}
-else { rect(0,0, POWERUP_SIZE, POWERUP_SIZE); } // Default
-pop();
+                 noFill();
+                 strokeWeight(2); // Ensure consistent stroke weight
+                 let arcRad = POWERUP_SIZE * 0.8;
+                 let numArcs = 3; // Draw 3 arcs for simplicity
+                 for(let i = 0; i < numArcs; i++){
+                     stroke(RAINBOW_COLORS[i % RAINBOW_COLORS.length]); // Use fixed colors from the array
+                     arc(0, 0, arcRad, arcRad, i * (180 / numArcs) - 90, (i + 1) * (180 / numArcs) - 90); // Draw semicircular arcs
+                 }
+                 stroke(0); // Reset stroke for timer bar later
+                 strokeWeight(1); // Reset stroke weight
+            }
+            // --- Cloud Disguise Icon ---
+            else if (type === 'CloudDisguise') {
+                 noStroke(); fill(displayColor[0], displayColor[1], displayColor[2], 220);
+                 ellipse(0, 0, POWERUP_SIZE * 0.8, POWERUP_SIZE * 0.6);
+                 ellipse(-POWERUP_SIZE * 0.3, POWERUP_SIZE * 0.1, POWERUP_SIZE * 0.5, POWERUP_SIZE * 0.4);
+                 ellipse(POWERUP_SIZE * 0.3, POWERUP_SIZE * 0.05, POWERUP_SIZE * 0.6, POWERUP_SIZE * 0.5);
+            }
+            else { rect(0,0, POWERUP_SIZE, POWERUP_SIZE); } // Default
+            pop();
 
             // Draw Timer Bar below icon
             let barWidth = iconSize;
@@ -420,13 +434,6 @@ pop();
             } else {
                 currentX += iconSpacing;
             }
-
-            // Wrap to next row if needed (optional, simple layout for now)
-            // if (countInRow >= iconsPerRow) {
-            //     currentY += iconSize + barHeight + 10; // Move down
-            //     currentX = alignRight ? x - iconSize : x; // Reset X
-            //     countInRow = 0;
-            // }
         }
     }
     pop();
@@ -441,7 +448,7 @@ function destroyHut(hutObj) { if (!hutObj || hutObj.destroyed) return; /* consol
 
 
 // =====================
-// --- Plane Class --- (Major Changes for Multiple Powerups)
+// --- Plane Class --- (Major Changes for Multiple Powerups, Cloud Disguise)
 // =====================
 class Plane {
     constructor(x, y, bodyCol, wingCol, accentCol, controls, id) {
@@ -470,11 +477,45 @@ class Plane {
         this.rainbowTrailCounter = 0;
         // NEW: Store multiple active powerups and their timers
         this.activePowerUps = {}; // e.g., { 'Shield': 1800, 'RapidFire': 1500 }
+
+        // Cloud Disguise specific properties
+        this.cloudPuffOffsets = []; // Store puff details for disguise
+        this.generateCloudPuffOffsets(); // Generate initial (but unused until powerup)
     }
 
     assignEngineSound(soundObject) { this.engineSound = soundObject; }
     createPlaneShape(s) { return { fuselage: [ {x: s * 0.8, y: 0}, {x: s * 0.6, y: -s * 0.1}, {x: -s * 0.7, y: -s * 0.15}, {x: -s * 0.95, y: -s * 0.05}, {x: -s * 0.9, y: 0}, {x: -s * 0.95, y: s * 0.05}, {x: -s * 0.7, y: s * 0.15}, {x: s * 0.6, y: s * 0.1} ], topWing: [ {x: s * 0.35, y: -s * 0.25}, {x: s * 0.25, y: -s * 0.7}, {x: -s * 0.45, y: -s * 0.7}, {x: -s * 0.4, y: -s * 0.25} ], bottomWing: [ {x: s * 0.25, y: s * 0.25}, {x: s * 0.15, y: s * 0.6}, {x: -s * 0.35, y: s * 0.6}, {x: -s * 0.3, y: s * 0.25} ], tailplane: [ {x: -s * 0.75, y: -s * 0.1}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 1.0, y: 0}, {x: -s * 1.05, y: s * 0.35}, {x: -s * 0.75, y: s * 0.1} ], rudder: [ {x: -s * 0.9, y: 0}, {x: -s * 1.15, y: -s * 0.4}, {x: -s * 1.05, y: -s * 0.35}, {x: -s * 0.75, y: -s * 0.1} ], cockpit: [ {x: s * 0.4, y: -s * 0.1}, {x: s * 0.1, y: -s*0.35}, {x: -s*0.1, y: -s*0.25} ], wheels: [ {x: s*0.15, y: s*0.7}, {x: -s*0.2, y: s*0.7} ], wheelRadius: s * 0.18 }; }
-    handleInput(keys) { if (!this.isAlive || this.respawnTimer > 0 || this.isBubbled) { this.isThrusting = false; this.isTurningLeft = false; this.isTurningRight = false; return; } this.isThrusting = keys[this.controls.thrust] || false; this.isTurningLeft = keys[this.controls.left] || false; this.isTurningRight = keys[this.controls.right] || false; if (keys[this.controls.shoot]) { this.shoot(); } }
+
+    // Helper for cloud disguise puffs
+    generateCloudPuffOffsets() {
+        this.cloudPuffOffsets = [];
+        let baseRadius = this.size * CLOUD_DISGUISE_SIZE_FACTOR;
+        for (let i = 0; i < CLOUD_DISGUISE_PUFF_COUNT; i++) {
+            let angle = random(360);
+            let dist = random(0.1, 0.5) * baseRadius;
+            let puffX = cos(angle) * dist;
+            let puffY = sin(angle) * dist + random(-baseRadius * 0.1, baseRadius * 0.1); // Slight vertical bias?
+            let puffR = random(baseRadius * 0.4, baseRadius * 0.7) * random(0.8, 1.2);
+            this.cloudPuffOffsets.push({ x: puffX, y: puffY, r: puffR });
+        }
+    }
+
+    handleInput(keys) {
+        // Allow input even when disguised, but not when bubbled or respawning
+        if (!this.isAlive || this.respawnTimer > 0 || this.isBubbled) {
+            this.isThrusting = false;
+            this.isTurningLeft = false;
+            this.isTurningRight = false;
+            return;
+        }
+        this.isThrusting = keys[this.controls.thrust] || false;
+        this.isTurningLeft = keys[this.controls.left] || false;
+        this.isTurningRight = keys[this.controls.right] || false;
+        if (keys[this.controls.shoot]) {
+            this.shoot();
+        }
+    }
+
     applyForce(force) { this.velocity.add(force); }
 
     update() {
@@ -495,15 +536,25 @@ class Plane {
         }
 
         // --- PowerUp Timer Update ---
+        let expiredPowerups = [];
         for (const type in this.activePowerUps) {
             if (this.activePowerUps.hasOwnProperty(type)) {
                 this.activePowerUps[type]--; // Decrement timer
                 if (this.activePowerUps[type] <= 0) {
-                    // console.log(`Plane ${this.id} ${type} expired.`);
-                    delete this.activePowerUps[type]; // Remove expired powerup
+                    expiredPowerups.push(type); // Mark for removal
                 }
             }
         }
+        // Remove expired powerups and handle effects (like cloud disguise fade)
+        for (const type of expiredPowerups) {
+            // console.log(`Plane ${this.id} ${type} expired.`);
+            delete this.activePowerUps[type];
+            if (type === 'CloudDisguise' && audioStarted && soundNodesStarted && cloudPoofSound && cloudPoofEnv) {
+                 cloudPoofEnv.play(cloudPoofSound); // Play sound on expiration
+            }
+            // Add other expiration effects if needed
+        }
+
 
         // --- Bubble State Update ---
         if (this.isBubbled) {
@@ -525,6 +576,7 @@ class Plane {
         let groundCheckY = GROUND_Y - (this.size * 0.8);
 
         // --- Movement controls only if NOT bubbled ---
+        // Cloud disguise does NOT restrict turning
         if (!this.isBubbled) {
             if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
             if (this.isTurningRight) { this.angle += TURN_SPEED; }
@@ -535,6 +587,7 @@ class Plane {
         const STALL_ENTRY_SIN_THRESHOLD = sin(STALL_ANGLE_THRESHOLD);
         const STALL_RECOVERY_SIN_THRESHOLD = sin(STALL_RECOVERY_ANGLE);
 
+        // Cloud disguise does not prevent stalling
         if (!this.isOnGround && !this.isBubbled) {
             if (!this.isStalled) {
                 if (verticalPointing < STALL_ENTRY_SIN_THRESHOLD) {
@@ -552,6 +605,7 @@ class Plane {
         }
 
         // --- Calculate Forces (only if not bubbled) ---
+        // Cloud disguise does NOT affect forces
         let thrustVector = createVector(0, 0);
         let currentThrustForce = THRUST_FORCE;
         if (!this.isBubbled) {
@@ -571,83 +625,41 @@ class Plane {
             // --- Grounded Physics ---
             this.velocity.x *= GROUND_FRICTION; // Apply ground friction to horizontal speed
 
-            // Determine if angled for takeoff (for applying thrust/gravity correctly)
-            let normAngle = (this.angle % 360 + 360) % 360; // Normalized angle 0-360
-            const TAKEOFF_MIN_ANGLE_P1 = -10;
-            const TAKEOFF_MAX_ANGLE_P1 = -85;
-            const TAKEOFF_MIN_ANGLE_P2 = 190;
-            const TAKEOFF_MAX_ANGLE_P2 = 265;
-            let isAngledForTakeoff = (this.id === 1)
-                ? (this.angle < TAKEOFF_MIN_ANGLE_P1 && this.angle > TAKEOFF_MAX_ANGLE_P1)
-                : (normAngle > TAKEOFF_MIN_ANGLE_P2 && normAngle < TAKEOFF_MAX_ANGLE_P2);
+            let normAngle = (this.angle % 360 + 360) % 360;
+            const TAKEOFF_MIN_ANGLE_P1 = -10; const TAKEOFF_MAX_ANGLE_P1 = -85;
+            const TAKEOFF_MIN_ANGLE_P2 = 190; const TAKEOFF_MAX_ANGLE_P2 = 265;
+            let isAngledForTakeoff = (this.id === 1) ? (this.angle < TAKEOFF_MIN_ANGLE_P1 && this.angle > TAKEOFF_MAX_ANGLE_P1) : (normAngle > TAKEOFF_MIN_ANGLE_P2 && normAngle < TAKEOFF_MAX_ANGLE_P2);
 
-            // --- Apply Thrust (if not bubbled) ---
+            // Apply Thrust (if not bubbled)
             if (this.isThrusting && !this.isBubbled) {
-                if (isAngledForTakeoff) {
-                    // Apply thrust with small upward component when angled correctly
-                    this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15));
-                } else {
-                    // Apply only horizontal thrust when not angled for takeoff (taxiing)
-                    this.applyForce(createVector(thrustVector.x, 0));
-                }
+                 if (isAngledForTakeoff) { this.applyForce(createVector(thrustVector.x, thrustVector.y * 0.15)); }
+                 else { this.applyForce(createVector(thrustVector.x, 0)); }
             }
-
-            // --- Apply Gravity / Downward Force (Revised Logic) ---
-             if (this.isThrusting && !this.isBubbled && isAngledForTakeoff) {
-                 // Reduced gravity when actively trying to take off (angled correctly)
-                this.applyForce(createVector(0, GRAVITY_FORCE * 0.7));
-            } else if (this.isThrusting && !this.isBubbled && !isAngledForTakeoff) {
-                // Normal gravity when thrusting but not angled for takeoff (taxiing)
-                // IMPORTANT FIX: Prevents being pinned down by extra gravity just for thrusting flat.
-                this.applyForce(createVector(0, GRAVITY_FORCE * 1.0));
-            }
-             else { // Not thrusting, or bubbled on ground
-                // Stronger gravity when idle on ground
-                this.applyForce(createVector(0, GRAVITY_FORCE * 2.0));
-            }
-
-            // --- Ground Clamping ---
-            // Ensure plane stays exactly on the ground level if it goes slightly below
-            if (this.position.y > groundCheckY) {
-                this.position.y = groundCheckY;
-                if(this.velocity.y > 0) this.velocity.y = 0; // Stop downward velocity if clamping
-            }
-
-            // --- Takeoff Transition ---
+            // Apply Gravity / Downward Force
+             if (this.isThrusting && !this.isBubbled && isAngledForTakeoff) { this.applyForce(createVector(0, GRAVITY_FORCE * 0.7)); }
+             else if (this.isThrusting && !this.isBubbled && !isAngledForTakeoff) { this.applyForce(createVector(0, GRAVITY_FORCE * 1.0)); }
+             else { this.applyForce(createVector(0, GRAVITY_FORCE * 2.0)); }
+            // Ground Clamping
+            if (this.position.y > groundCheckY) { this.position.y = groundCheckY; if(this.velocity.y > 0) this.velocity.y = 0; }
+            // Takeoff Transition
             let horizontalSpeed = abs(this.velocity.x);
-            // Check all conditions: thrusting, angled correctly, speed met, not bubbled
             if (this.isThrusting && isAngledForTakeoff && horizontalSpeed > MIN_TAKEOFF_SPEED && !this.isBubbled) {
-                this.isOnGround = false; // Transition to airborne state
-                this.isStalled = false; // Ensure not stalled on takeoff
-                // Give an upward boost on takeoff
-                this.velocity.y -= currentThrustForce * 2.0; // Was 3.0, slightly reduced boost
+                this.isOnGround = false; this.isStalled = false; this.velocity.y -= currentThrustForce * 2.0;
             }
 
         } else { // --- Airborne Physics ---
-            if (!this.isBubbled) { // Apply normal airborne physics if not bubbled
+            if (!this.isBubbled) { // Apply normal airborne physics if not bubbled (Cloud Disguise doesn't change physics)
                 this.applyForce(thrustVector); // Apply engine thrust
-
                 // Apply lift based on speed (reduced by rain or stall)
                 let speed = this.velocity.mag();
                 let liftMagnitude = speed * LIFT_FACTOR;
-                if (isCurrentlyRaining) {
-                    liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR;
-                }
-                if (this.isStalled) {
-                    liftMagnitude *= STALL_EFFECT_FACTOR;
-                }
+                if (isCurrentlyRaining) { liftMagnitude *= RAIN_LIFT_REDUCTION_FACTOR; }
+                if (this.isStalled) { liftMagnitude *= STALL_EFFECT_FACTOR; }
                 this.applyForce(createVector(0, -liftMagnitude)); // Upward lift force
-
-                // Apply gravity
-                this.applyForce(createVector(0, GRAVITY_FORCE));
-
-                // Apply air drag
-                this.velocity.mult(DAMPING_FACTOR);
-
+                this.applyForce(createVector(0, GRAVITY_FORCE)); // Apply gravity
+                this.velocity.mult(DAMPING_FACTOR); // Apply air drag
             } else { // Bubbled in the air
-                 // Bubbles still affected slightly by gravity
                  this.applyForce(createVector(0, GRAVITY_FORCE * 0.3));
-                 // Bubble floating force is applied earlier in the bubble state update
             }
         }
 
@@ -657,98 +669,58 @@ class Plane {
              this.position.add(this.velocity);
         }
 
-
         // --- Landing / Ground Interaction (Post-Position Update) ---
-        // Check if plane crossed the ground threshold while airborne
         if (this.position.y >= groundCheckY && !this.isOnGround) {
              let normAngle = (this.angle % 360 + 360) % 360;
-             // Check for steep angle (likely to crash)
              let isTooSteep = (normAngle > 45 && normAngle < 135) || (normAngle > 225 && normAngle < 315);
-             let verticalSpeed = this.velocity.y; // Speed plane is hitting the ground
+             let verticalSpeed = this.velocity.y;
 
              // --- TRAMPOLINE POWERUP OVERRIDE ---
              if (this.activePowerUps['Trampoline'] && verticalSpeed > 0 && !this.isBubbled) {
-                  if (verticalSpeed < TRAMPOLINE_MAX_SPEED_THRESHOLD) { // Bounce only if speed is manageable
-                      this.position.y = groundCheckY - 1; // Move slightly above ground
-                      this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE; // Reverse and boost vertical velocity
-                      this.velocity.x *= 0.9; // Dampen horizontal speed slightly on bounce
-                      this.velocity.add(p5.Vector.random2D().mult(0.5)); // Add small random impulse
-                      if (audioStarted && soundNodesStarted && boingSound && boingEnv) {
-                          boingSound.freq(random(300, 600));
-                          boingEnv.play(boingSound);
-                      }
-                      // Use up some trampoline powerup time faster on bounce
+                  if (verticalSpeed < TRAMPOLINE_MAX_SPEED_THRESHOLD) {
+                      this.position.y = groundCheckY - 1; this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE; this.velocity.x *= 0.9; this.velocity.add(p5.Vector.random2D().mult(0.5));
+                      if (audioStarted && soundNodesStarted && boingSound && boingEnv) { boingSound.freq(random(300, 600)); boingEnv.play(boingSound); }
                       if(this.activePowerUps['Trampoline']) this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.05);
-                  } else {
-                      // Land normally (don't bounce) even with trampoline if speed is too high
-                      this.isOnGround = true;
-                      this.isStalled = false;
-                      this.position.y = groundCheckY;
-                      this.velocity.y = 0; // Stop vertical velocity
-                      // Pop bubble if landing while bubbled (shouldn't happen with trampoline active, but good fallback)
+                  } else { // Land normally if too fast for trampoline
+                      this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0;
                       if (this.isBubbled) { this.isBubbled = false; this.bubbleTimer = 0; if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound); }
                   }
              }
              // --- REGULAR LANDING / CRASH CHECK (Only if Trampoline NOT active/used) ---
              else {
-                 // Crash condition: Too fast OR too steep, AND not shielded OR bubbled
+                 // Crash condition: Too fast OR too steep, AND not shielded OR bubbled (Cloud Disguise offers no protection)
                  if ((verticalSpeed > MAX_LANDING_SPEED || isTooSteep) && !this.activePowerUps['Shield'] && !this.isBubbled) {
-                      this.hit(true); // CRASH! (true indicates crash/bomb hit)
-                      return; // Stop further updates this frame after crash
+                      this.hit(true); return; // Stop updates this frame after crash
                  }
                  // Safe landing or Shield absorption
                  else {
-                     this.isOnGround = true; // Landed safely
-                     this.isStalled = false; // Recover stall state
-                     this.position.y = groundCheckY; // Set position exactly to ground level
-                     this.velocity.y = 0; // Stop vertical velocity
-
-                     // Pop bubble if landing while bubbled
-                     if (this.isBubbled) {
-                         this.isBubbled = false;
-                         this.bubbleTimer = 0;
-                         if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound);
-                     }
-                     // Use up Shield faster if it absorbed a hard landing
-                     if (this.activePowerUps['Shield'] && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) {
-                         if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.4);
-                     }
+                     this.isOnGround = true; this.isStalled = false; this.position.y = groundCheckY; this.velocity.y = 0;
+                     if (this.isBubbled) { this.isBubbled = false; this.bubbleTimer = 0; if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) bubbleEnv.play(bubblePopSound); }
+                     if (this.activePowerUps['Shield'] && (verticalSpeed > MAX_LANDING_SPEED || isTooSteep)) { if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.4); }
                  }
              }
         } // End of landing check
 
         // --- Boundary Constraints (Screen Wrapping & Ceiling) ---
-        if (this.position.x > width + this.size) { this.position.x = -this.size; } // Wrap right to left
-        else if (this.position.x < -this.size) { this.position.x = width + this.size; } // Wrap left to right
-        if (this.position.y < this.size / 2) { // Ceiling boundary
-            this.position.y = this.size / 2;
-            if (this.velocity.y < 0) {
-                this.velocity.y = 0; // Stop upward velocity at ceiling
-            }
-        }
+        if (this.position.x > width + this.size) { this.position.x = -this.size; }
+        else if (this.position.x < -this.size) { this.position.x = width + this.size; }
+        if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
 
         // --- Collisions (Hut, Balloon) if still alive ---
-        if (!this.isAlive) return; // Double check aliveness after potential crash
+        if (!this.isAlive) return; // Double check aliveness
 
-        // Check Hut collision (hit logic might kill the plane, so check isAlive again after)
-        if (this.checkCollisionHut(hut)) {
-             if (!this.isAlive) return; // Exit if hut collision killed the plane
-        }
+        // Check Hut collision (Cloud Disguise doesn't prevent)
+        if (this.checkCollisionHut(hut)) { if (!this.isAlive) return; }
 
         // Check Balloon collision
         if (balloon.isAlive) {
             let distanceSq = (this.position.x - balloon.pos.x)**2 + (this.position.y - balloon.pos.y)**2;
-            let combinedRadiusSq = (this.size * 0.9 + balloon.radius)**2; // Using fixed size
+            let combinedRadiusSq = (this.size * 0.9 + balloon.radius)**2;
             if (distanceSq < combinedRadiusSq) {
-                if (this.activePowerUps['Shield']) { // Shielded plane destroys balloon
-                    balloon.hit();
-                    // Use up shield faster on balloon collision
-                     if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2);
-                } else if (!this.isBubbled) { // Unshielded, non-bubbled plane crashes into balloon
-                    this.hit(true); // Crash!
-                    return; // Exit after crash
+                if (this.activePowerUps['Shield']) { balloon.hit(); if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2); }
+                else if (!this.isBubbled) { // Unshielded, non-bubbled (even if disguised) plane crashes
+                    this.hit(true); return;
                 }
-                // Bubbled plane just bumps harmlessly (or shielded plane passes through after destroying)
             }
         }
 
@@ -758,76 +730,85 @@ class Plane {
              if (this.rainbowTrailCounter >= RAINBOW_TRAIL_PARTICLE_INTERVAL) {
                  this.rainbowTrailCounter = 0;
                  let trailColor = RAINBOW_COLORS[rainbowColorIndex % RAINBOW_COLORS.length];
-                 let offset = p5.Vector.fromAngle(radians(this.angle + 180), this.size * 0.5); // Emit from tail
+                 let offset = p5.Vector.fromAngle(radians(this.angle + 180), this.size * 0.5);
                  let spawnPos = p5.Vector.add(this.position, offset);
-                 if (particles.length < MAX_PARTICLES) {
-                     particles.push(new RainbowParticle(spawnPos.x, spawnPos.y, trailColor));
-                 }
+                 if (particles.length < MAX_PARTICLES) { particles.push(new RainbowParticle(spawnPos.x, spawnPos.y, trailColor)); }
                  rainbowColorIndex++;
-                 // Play sparkle sound occasionally
-                 if (random() < 0.1 && audioStarted && soundNodesStarted && rainbowSparkleSound && rainbowEnv) {
-                     rainbowSparkleSound.freq(random(800, 1600));
-                     rainbowEnv.play(rainbowSparkleSound);
-                 }
+                 if (random() < 0.1 && audioStarted && soundNodesStarted && rainbowSparkleSound && rainbowEnv) { rainbowSparkleSound.freq(random(800, 1600)); rainbowEnv.play(rainbowSparkleSound); }
              }
          }
 
         // --- Engine Sound Update ---
+        // Cloud Disguise does not affect engine sound
         if (this.isAlive && this.engineSound && audioStarted && soundNodesStarted) {
             let targetFreq = BASE_ENGINE_FREQ;
             let targetAmp = BASE_ENGINE_AMP;
-
             if (!this.isBubbled) { // Normal engine sound logic
                  let speed = this.velocity.mag();
                  targetFreq = map(speed, 0, MAX_SPEED_FOR_SOUND, BASE_ENGINE_FREQ, MAX_ENGINE_FREQ, true);
                  targetAmp = (this.isThrusting) ? MAX_ENGINE_AMP : BASE_ENGINE_AMP;
-
-                 if (this.isStalled) {
-                     targetAmp *= 0.5;
-                     targetFreq *= 0.8;
-                 }
-                 if (this.activePowerUps['SpeedBoost']) {
-                     targetFreq *= 1.1;
-                     targetAmp *= 1.1;
-                 }
-                 if (this.isOnGround && !this.isThrusting) {
-                    targetAmp = BASE_ENGINE_AMP * 0.5; // Quieter idle on ground
-                 }
+                 if (this.isStalled) { targetAmp *= 0.5; targetFreq *= 0.8; }
+                 if (this.activePowerUps['SpeedBoost']) { targetFreq *= 1.1; targetAmp *= 1.1; }
+                 if (this.isOnGround && !this.isThrusting) { targetAmp = BASE_ENGINE_AMP * 0.5; }
              } else { // Muffled sound when bubbled
-                 targetAmp = BASE_ENGINE_AMP * 0.5;
-                 targetFreq = BASE_ENGINE_FREQ * 0.8;
+                 targetAmp = BASE_ENGINE_AMP * 0.5; targetFreq = BASE_ENGINE_FREQ * 0.8;
              }
-
-            // Apply sound changes smoothly
-            this.engineSound.amp(targetAmp, 0.1);
-            this.engineSound.freq(targetFreq, 0.1);
+            this.engineSound.amp(targetAmp, 0.1); this.engineSound.freq(targetFreq, 0.1);
         }
-        else if (this.engineSound && this.engineSound.getAmp() > 0) {
-            // Fade out sound if dead or audio stopped
-            this.engineSound.amp(0, 0.1);
-        }
+        else if (this.engineSound && this.engineSound.getAmp() > 0) { this.engineSound.amp(0, 0.1); }
 
     } // --- End of update() ---
 
     display() {
-        push(); translate(this.position.x, this.position.y); rotate(this.angle); if (this.id === 2) { scale(1, -1); }
-        // No overall scaling needed now - fixed size
-        if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) { /* Flicker */ }
+        push();
+        translate(this.position.x, this.position.y);
+
+        // Flicker if respawning
+        if (this.respawnTimer > 0 && floor(this.respawnTimer / 8) % 2 === 0) {
+             // Don't draw anything to make it flicker
+        }
+        // --- CLOUD DISGUISE DRAWING ---
+        else if (this.activePowerUps['CloudDisguise']) {
+             noStroke();
+             let baseOpacity = CLOUD_DISGUISE_OPACITY;
+             // Fade out effect
+             let timer = this.activePowerUps['CloudDisguise'];
+             if (timer < 120) {
+                 baseOpacity = map(timer, 0, 120, 0, CLOUD_DISGUISE_OPACITY);
+                 if (floor(frameCount / 4) % 2 === 0) baseOpacity = 0; // Flicker when ending
+             }
+
+             // Shadow (optional, slightly darker)
+             fill(CLOUD_SHADOW[0] * 0.9, CLOUD_SHADOW[1] * 0.9, CLOUD_SHADOW[2] * 0.9, baseOpacity * 0.5);
+             ellipse(0, this.size * 0.4, this.size * CLOUD_DISGUISE_SIZE_FACTOR * 1.1, this.size * CLOUD_DISGUISE_SIZE_FACTOR * 0.6);
+
+             // Main puffs (use pre-generated offsets)
+             fill(CLOUD_COLOR[0], CLOUD_COLOR[1], CLOUD_COLOR[2], baseOpacity);
+             let wobbleFactor = sin(frameCount * 1.5 + this.id * 10) * 0.05 + 1.0; // Gentle size wobble
+             for (let puff of this.cloudPuffOffsets) {
+                 ellipse(puff.x, puff.y, puff.r * wobbleFactor, puff.r * 0.85 * wobbleFactor);
+             }
+        }
+        // --- NORMAL PLANE DRAWING ---
         else {
+            rotate(this.angle);
+            if (this.id === 2) { scale(1, -1); } // Flip P2 visually
+
             stroke(0); strokeWeight(1.5); let pp = this.planePoints;
             fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.accentColor); beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.wingColor); beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE); noFill(); stroke(0, 150); strokeWeight(1.5); if (pp.cockpit.length >= 2) { beginShape(); curveVertex(pp.cockpit[0].x, pp.cockpit[0].y); for(let p of pp.cockpit) { curveVertex(p.x, p.y); } curveVertex(pp.cockpit[pp.cockpit.length - 1].x, pp.cockpit[pp.cockpit.length - 1].y); endShape(); }
             let wheelDrawThreshold = GROUND_Y - this.size * 3; if (this.isOnGround || (!this.isOnGround && this.position.y > wheelDrawThreshold) || (!this.isOnGround && this.velocity.y > 0.3)) { fill(40); noStroke(); ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2); ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2); stroke(60); strokeWeight(3); line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1); line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1); }
             noStroke(); let noseX = this.size * 0.85; let propHeight = this.size * 0.9; let propWidthRunning = this.size * 0.15; let propWidthStopped = this.size * 0.05; let engineRunning = (this.isThrusting || (this.velocity.magSq() > 0.5)) && !this.isBubbled; if (engineRunning) { fill(PROPELLER_BLUR_COLOR); ellipse(noseX, 0, propWidthRunning, propHeight); } else { fill(PROPELLER_STOPPED_COLOR); rect(noseX, 0, propWidthStopped, propHeight); } fill(this.accentColor); ellipse(noseX, 0, this.size * 0.2, this.size * 0.2);
-            // --- Display Active Powerup Effects ---
+            // --- Display Active Powerup Effects (Shield, Bubble) ---
             if (this.activePowerUps['Shield']) { let shieldTimer = this.activePowerUps['Shield']; let shieldAlpha = SHIELD_COLOR[3] * (0.7 + sin(frameCount * 4) * 0.3); if (shieldTimer < 120 && floor(frameCount / 5) % 2 === 0) { shieldAlpha = 0; } fill(SHIELD_COLOR[0], SHIELD_COLOR[1], SHIELD_COLOR[2], shieldAlpha); noStroke(); ellipse(0, 0, this.size * 2.8, this.size * 2.2); }
-             if (this.isBubbled) { let bubbleAlpha = BUBBLE_FILL_COLOR[3] * (0.8 + sin(frameCount * 2) * 0.2); fill(BUBBLE_FILL_COLOR[0], BUBBLE_FILL_COLOR[1], BUBBLE_FILL_COLOR[2], bubbleAlpha); strokeWeight(2); stroke(BUBBLE_STROKE_COLOR[0],BUBBLE_STROKE_COLOR[1],BUBBLE_STROKE_COLOR[2], BUBBLE_STROKE_COLOR[3] * 0.8); ellipse(0, 0, this.size * 3.0, this.size * 3.0); noFill(); stroke(255, 255, 255, 100); arc(this.size * -0.5, this.size * -0.5, this.size * 1.5, this.size * 1.5, 180, 270); }
-             // Add other visual effects here (e.g., speed boost trail?)
+            if (this.isBubbled) { let bubbleAlpha = BUBBLE_FILL_COLOR[3] * (0.8 + sin(frameCount * 2) * 0.2); fill(BUBBLE_FILL_COLOR[0], BUBBLE_FILL_COLOR[1], BUBBLE_FILL_COLOR[2], bubbleAlpha); strokeWeight(2); stroke(BUBBLE_STROKE_COLOR[0],BUBBLE_STROKE_COLOR[1],BUBBLE_STROKE_COLOR[2], BUBBLE_STROKE_COLOR[3] * 0.8); ellipse(0, 0, this.size * 3.0, this.size * 3.0); noFill(); stroke(255, 255, 255, 100); arc(this.size * -0.5, this.size * -0.5, this.size * 1.5, this.size * 1.5, 180, 270); }
         }
-        pop(); noStroke();
+        pop();
+        noStroke();
     }
 
 
     shoot() {
+        // Cloud Disguise does not affect shooting ability or angle requirements
         let isAngledForShootingOnGround = false; let normalizedAngle = (this.angle % 360 + 360) % 360; if (this.id === 1) { isAngledForShootingOnGround = (this.angle < -10 && this.angle > -170); } else { isAngledForShootingOnGround = (normalizedAngle > 190 && normalizedAngle < 350); }
         let canShoot = (!this.isOnGround || (this.isOnGround && isAngledForShootingOnGround)) && !this.isBubbled;
 
@@ -837,7 +818,7 @@ class Plane {
         else if (this.activePowerUps['Bomb']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 2.0; }
         else if (this.activePowerUps['ChickenLauncher']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.2; }
         else if (this.activePowerUps['BubbleGun']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.1; }
-        // ReverseGun doesn't change cooldown itself but fires extra shot
+        // Cloud Disguise does not affect cooldown
 
         if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
             let originOffsetDistance = this.size * 0.9;
@@ -845,21 +826,16 @@ class Plane {
             let primaryOffsetVector = createVector(originOffsetDistance, 0);
             let hasReverseGun = this.activePowerUps['ReverseGun'];
 
-            // --- Determine primary shooting direction ---
-            if (hasReverseGun) {
-                primarySpawnAngle += 180; // Primary shot is backward
-                primaryOffsetVector = createVector(-originOffsetDistance, 0); // Offset backward
-            }
+            // Determine primary shooting direction
+            if (hasReverseGun) { primarySpawnAngle += 180; primaryOffsetVector = createVector(-originOffsetDistance, 0); }
             let primaryRotatedOffset = primaryOffsetVector.copy().rotate(this.angle);
             let primarySpawnPos = p5.Vector.add(this.position, primaryRotatedOffset);
 
-            // --- Fire primary projectile(s) ---
+            // Fire primary projectile(s)
             let fired = false;
             if (this.activePowerUps['Bomb']) {
-                // Bomb always drops slightly behind, regardless of ReverseGun
                 let bombOffsetDist = -this.size * 0.3; let bombOffsetVec = createVector(bombOffsetDist, 0).rotate(this.angle); let bombSpawnPos = p5.Vector.add(this.position, bombOffsetVec);
                 bombs.push(new Bomb(bombSpawnPos.x, bombSpawnPos.y, this.id, this.velocity)); if (bombDropSound && shootNoise) { bombDropSound.play(shootNoise); }
-                // Also fire primary bullet (forward/reverse based on ReverseGun)
                 bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             } else if (this.activePowerUps['TripleShot']) {
                 let angle1 = primarySpawnAngle - TRIPLE_SHOT_SPREAD_ANGLE; let angle2 = primarySpawnAngle; let angle3 = primarySpawnAngle + TRIPLE_SHOT_SPREAD_ANGLE;
@@ -868,20 +844,17 @@ class Plane {
             } else if (this.activePowerUps['ChickenLauncher']) {
                  bullets.push(new ChickenProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (chickenSound && chickenEnv) { chickenSound.freq(random(700,1000)); chickenEnv.play(chickenSound); } fired = true;
             } else if (this.activePowerUps['BubbleGun']) {
-                 bullets.push(new BubbleProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (shootSoundEnv && shootNoise) { /* Modify sound? */ shootSoundEnv.play(shootNoise); } fired = true;
-            } else { // Normal bullet (RapidFire handled by cooldown, ReverseGun by primarySpawnAngle)
+                 bullets.push(new BubbleProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
+            } else { // Normal bullet (RapidFire/ReverseGun handled by cooldown/angle)
                  bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             }
 
-            // --- Fire EXTRA forward bullet if ReverseGun is active ---
+            // Fire EXTRA forward bullet if ReverseGun is active
             if (hasReverseGun) {
-                 let forwardSpawnAngle = this.angle; // Standard forward angle
-                 let forwardOffsetVector = createVector(originOffsetDistance, 0); // Standard forward offset
-                 let forwardRotatedOffset = forwardOffsetVector.copy().rotate(this.angle);
-                 let forwardSpawnPos = p5.Vector.add(this.position, forwardRotatedOffset);
+                 let forwardSpawnAngle = this.angle; let forwardOffsetVector = createVector(originOffsetDistance, 0);
+                 let forwardRotatedOffset = forwardOffsetVector.copy().rotate(this.angle); let forwardSpawnPos = p5.Vector.add(this.position, forwardRotatedOffset);
                  bullets.push(new Bullet(forwardSpawnPos.x, forwardSpawnPos.y, forwardSpawnAngle, this.id, this.bodyColor));
-                 // Play sound again? Or just rely on the primary sound? Rely on primary.
-                 fired = true; // Ensure cooldown applies even if only extra shot fired (shouldn't happen)
+                 fired = true;
             }
 
             if (fired) { this.shootCooldown = currentCooldown; }
@@ -890,6 +863,7 @@ class Plane {
 
 
     checkCollisionHut(hutObj) {
+        // Cloud disguise does not prevent hut collision
         if (!this.isAlive || this.respawnTimer > 0 || !hutObj || hutObj.destroyed || this.isBubbled) return false;
         let collisionRadius = this.size; let hutMinX = hutObj.x - hutObj.w / 2; let hutMaxX = hutObj.x + hutObj.w / 2; let hutMinY = hutObj.y - hutObj.h / 2; let hutMaxY = hutObj.y + hutObj.h / 2; let closestX = constrain(this.position.x, hutMinX, hutMaxX); let closestY = constrain(this.position.y, hutMinY, hutMaxY); let distanceSq = (this.position.x - closestX)**2 + (this.position.y - closestY)**2;
 
@@ -897,9 +871,12 @@ class Plane {
             let hitRoof = this.position.y < hutObj.y - hutObj.h * 0.3 && this.velocity.y > 0;
             if (this.activePowerUps['Trampoline'] && hitRoof && this.velocity.y > 0 && this.velocity.y < TRAMPOLINE_MAX_SPEED_THRESHOLD) { // Bounce off roof if Trampoline
                  this.velocity.y *= -TRAMPOLINE_BOUNCE_FORCE * 0.8; this.velocity.x *= 0.95;
-                 if(this.activePowerUps['Trampoline']) this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.1); // Use up faster
+                 if(this.activePowerUps['Trampoline']) this.activePowerUps['Trampoline'] = max(0, this.activePowerUps['Trampoline'] - POWERUP_DURATION_FRAMES * 0.1);
                  if (audioStarted && soundNodesStarted && boingSound && boingEnv) { boingSound.freq(random(400, 700)); boingEnv.play(boingSound); } return false;
-            } else if (!this.activePowerUps['Shield']) { this.hit(true); return true; } // Crash if not shielded
+            } else if (!this.activePowerUps['Shield']) { // Crash if not shielded (disguise doesn't help)
+                this.hit(true);
+                return true;
+            }
             return false; // Shielded, pass through
         } return false; // No collision
     }
@@ -908,19 +885,30 @@ class Plane {
     hit(causedByCrashOrBomb, projectile = null) {
         if (!this.isAlive) return false;
 
+        // Shield logic (Cloud Disguise does not protect)
         if (this.activePowerUps['Shield'] && !causedByCrashOrBomb && projectile && !(projectile instanceof BubbleProjectile)) {
              if (audioStarted && soundNodesStarted && shieldDeflectSound && shootNoise) { shieldDeflectSound.play(shootNoise); }
-             if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.15); // Use up shield faster on hit
+             if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.15);
              return false; // Deflected
         }
 
+        // Bubble projectile logic
         if (!causedByCrashOrBomb && projectile && projectile instanceof BubbleProjectile) {
-             if (!this.isBubbled) { this.isBubbled = true; this.bubbleTimer = BUBBLE_TRAP_DURATION; this.velocity.mult(0.1); if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) { bubbleEnv.play(bubblePopSound); } }
+             if (!this.isBubbled) {
+                 this.isBubbled = true; this.bubbleTimer = BUBBLE_TRAP_DURATION; this.velocity.mult(0.1);
+                 if (bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) { bubbleEnv.play(bubblePopSound); }
+                 // Also remove cloud disguise if bubbled
+                 if (this.activePowerUps['CloudDisguise']) {
+                     delete this.activePowerUps['CloudDisguise'];
+                     if (audioStarted && soundNodesStarted && cloudPoofSound && cloudPoofEnv) cloudPoofEnv.play(cloudPoofSound);
+                 }
+             }
              return false; // Bubbled, not "hit"
         }
 
+        // --- Actual Hit ---
         this.isAlive = false; this.isOnGround = false; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0;
-        this.activePowerUps = {}; // Clear all powerups on hit
+        this.activePowerUps = {}; // Clear ALL powerups on hit, including disguise
         this.velocity = createVector(random(-1.5, 1.5), -2.5); this.respawnTimer = RESPAWN_DELAY_FRAMES;
         createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
         if (this.engineSound && audioStarted && soundNodesStarted) this.engineSound.amp(0, 0);
@@ -944,15 +932,20 @@ class Plane {
     collectPowerUp(type) {
         if (!this.isAlive || this.respawnTimer > 0) return;
         // console.log(`Plane ${this.id} collected ${type}!`);
-        // Add or refresh the powerup timer in the object
-        this.activePowerUps[type] = POWERUP_DURATION_FRAMES;
-        if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); }
+        this.activePowerUps[type] = POWERUP_DURATION_FRAMES; // Add or refresh timer
+
+        if (type === 'CloudDisguise') {
+             this.generateCloudPuffOffsets(); // Generate fresh puffs for this instance
+             if (audioStarted && soundNodesStarted && cloudPoofSound && cloudPoofEnv) { cloudPoofEnv.play(cloudPoofSound); } // Play sound on collect
+        } else {
+             if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); } // Normal collect sound
+        }
     }
 }
 
 
 // ======================
-// --- Bullet Class --- (Removed size scaling)
+// --- Bullet Class --- (No changes needed here for Cloud Disguise)
 // ======================
 class Bullet {
     constructor(x, y, angle, ownerId, planeColor) { // Removed planeSize
@@ -974,9 +967,12 @@ class Bullet {
         if (!target || typeof target.isAlive === 'undefined' || !target.isAlive) return false;
         if (target instanceof Plane && (target.id === this.ownerId || target.respawnTimer > 0)) return false;
         if (!target.position || typeof target.position.x === 'undefined') return false;
+
+        // Cloud Disguise doesn't change collision detection logic - it uses the plane's actual position/size
         let targetRadius;
         if (targetIsBalloon) { if (typeof target.radius === 'undefined') return false; targetRadius = target.radius; }
         else { if (typeof target.size === 'undefined') return false; targetRadius = target.size * 0.8; } // Use fixed plane size
+
         let distanceSq = (this.position.x - target.position.x)**2 + (this.position.y - target.position.y)**2;
         let radiiSq = (targetRadius + this.size / 2)**2;
         return distanceSq < radiiSq;
@@ -986,7 +982,7 @@ class Bullet {
 }
 
 // ============================
-// --- ChickenProjectile Class ---
+// --- ChickenProjectile Class --- (No changes needed)
 // ============================
 class ChickenProjectile { // Unchanged from previous version as size was fixed
     constructor(x, y, angle, ownerId) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), CHICKEN_SPEED); this.ownerId = ownerId; this.size = 15; this.life = 180; this.bounces = 0; this.maxBounces = 3; this.rotation = random(360); this.rotationSpeed = random(-5, 5); this.gravity = GRAVITY_FORCE * 0.8; }
@@ -1004,29 +1000,17 @@ class ChickenProjectile { // Unchanged from previous version as size was fixed
         let radiiSq = (targetRadius + this.size / 2)**2;
         return distanceSq < radiiSq;
     }
-    
     // Lethal Chicken Hit Effect
     hitEffect(plane) {
-        // console.log(`Plane ${plane.id} fatally hit by chicken!`);
-        // Optional: Apply small impulse for visual effect before hit registers
-        // let pushVector = p5.Vector.sub(plane.position, this.position).normalize().mult(0.2);
-        // plane.velocity.add(pushVector);
-
-        if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) {
-            chickenSound.freq(random(900,1200)); // Squawk on hit
-            chickenEnv.play(chickenSound);
-        }
-        // Call plane.hit like a normal bullet
+        if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(900,1200)); chickenEnv.play(chickenSound); }
         plane.hit(false, this); // false = not crash, pass chicken projectile info
     }
-
-    
     checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; let hit = (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2); if(hit) { this.velocity.mult(-0.5); if (chickenSound && chickenEnv && audioStarted && soundNodesStarted) { chickenSound.freq(random(500,800)); chickenEnv.play(chickenSound); } } return false; }
 }
 
 
 // ==========================
-// --- BubbleProjectile Class ---
+// --- BubbleProjectile Class --- (No changes needed)
 // ==========================
 class BubbleProjectile { // Unchanged from previous version
     constructor(x, y, angle, ownerId) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BUBBLE_SPEED); this.ownerId = ownerId; this.size = 25; this.life = 240; this.wobbleOffset = random(100); this.wobbleMagnitude = this.size * 0.05; }
@@ -1044,7 +1028,7 @@ class BubbleProjectile { // Unchanged from previous version
         let radiiSq = (targetRadius + this.size / 2)**2;
         return distanceSq < radiiSq;
     }
-    hitEffect(plane) { plane.hit(false, this); }
+    hitEffect(plane) { plane.hit(false, this); } // Let plane.hit handle the bubbling logic
     checkCollisionHut(hutObj) { return false; }
 }
 
@@ -1054,7 +1038,7 @@ class BubbleProjectile { // Unchanged from previous version
  class Cloud { constructor() { this.pos = createVector(0,0); this.vel = createVector(0,0); this.size = 100; this.puffOffsets = []; this.numPuffs = 7; this.opacity = 200; this.speedFactor = 1; this.direction = 1; this.reset(); this.pos.x = random(width); } reset() { this.direction = random() < 0.5 ? -1 : 1; this.size = random(100, 190); let startX = this.direction > 0 ? -this.size * 1.5 : width + this.size * 1.5; this.pos = createVector(startX, random(height * 0.1, height * 0.6)); this.speedFactor = random(0.5, 1.5); this.vel = createVector(CLOUD_BASE_SPEED * this.direction * this.speedFactor, 0); this.numPuffs = floor(random(6, 12)); this.puffOffsets = []; for (let i = 0; i < this.numPuffs; i++) { let puffX = random(-this.size * 0.7, this.size * 0.7); let puffY = random(-this.size * 0.3, this.size * 0.3); let puffR = random(this.size * 0.4, this.size * 0.9) * random(0.8, 1.2); this.puffOffsets.push({ x: puffX, y: puffY, r: puffR }); } this.opacity = random(190, 240); } update() { this.pos.add(this.vel); if ( (this.vel.x > 0 && this.pos.x - this.size * 1.5 > width) || (this.vel.x < 0 && this.pos.x + this.size * 1.5 < 0) ) { this.reset(); } if (this.pos.y < -this.size || this.pos.y > height + this.size) { this.reset(); } } display() { push(); noStroke(); translate(this.pos.x, this.pos.y); fill(CLOUD_SHADOW[0], CLOUD_SHADOW[1], CLOUD_SHADOW[2], this.opacity * 0.6); ellipse(0, this.size * 0.25, this.size * 1.3, this.size * 0.7); fill(CLOUD_COLOR[0], CLOUD_COLOR[1], CLOUD_COLOR[2], this.opacity); for (let puff of this.puffOffsets) { ellipse(puff.x, puff.y, puff.r, puff.r * 0.85); } pop(); } }
 
 // ==========================
-// --- Hot Air Balloon Class --- (Includes respawn fix)
+// --- Hot Air Balloon Class --- (Unchanged)
 // ==========================
 class Balloon { constructor(x, y) { this.basePos = createVector(x, y); this.pos = this.basePos.copy(); this.position = this.pos; this.bobbleOffset = 0; this.bobbleSpeed = 0.6; this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.radius = 30; this.visualRadius = 30; this.basketSize = { w: 25, h: 18 }; this.ropeLength = 25; this.isAlive = true; this.respawnTimer = 0; }
     update() { if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; } if (!this.isAlive) return; this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; this.basePos.x += this.driftSpeed; if (this.driftSpeed > 0 && this.basePos.x > width + this.visualRadius * 2) { this.basePos.x = -this.visualRadius * 2; } else if (this.driftSpeed < 0 && this.basePos.x < -this.visualRadius * 2) { this.basePos.x = width + this.visualRadius * 2; } this.pos.y = this.basePos.y + this.bobbleOffset; this.pos.x = this.basePos.x; }
@@ -1079,7 +1063,7 @@ class RainbowParticle { constructor(x, y, assignedColor) { this.pos = createVect
  function createExplosion(x, y, count, colors, isBomb = false) { if (audioStarted && soundNodesStarted) { if (isBomb && bombExplosionSoundEnv && bombExplosionNoise) { bombExplosionSoundEnv.play(bombExplosionNoise); } else if (!isBomb && explosionSoundEnv && explosionNoise) { explosionSoundEnv.play(explosionNoise); } } if (particles.length > MAX_PARTICLES) return; for (let i = 0; i < count; i++) { let chosenColor = random(colors); if (particles.length < MAX_PARTICLES) { particles.push(new Particle(x, y, chosenColor)); } else { break; } } }
 
 // ==========================
-// --- PowerUp Class --- (Removed Shrink/Grow display)
+// --- PowerUp Class --- (Added Cloud Disguise display)
 // ==========================
 class PowerUp { constructor(x, y, type) { this.position = createVector(x, y); this.velocity = createVector(random(-0.5, 0.5), POWERUP_FALL_SPEED); this.type = type; this.color = color(POWERUP_COLORS[type] || [255, 255, 255]); this.size = POWERUP_SIZE; this.lifespan = POWERUP_DURATION_FRAMES * 1.5; this.rotation = 0; this.rotationSpeed = random(-2, 2); }
     update() { this.position.add(this.velocity); this.velocity.y += GRAVITY_FORCE * 0.2; this.velocity.mult(0.99); this.lifespan--; this.rotation += this.rotationSpeed; if (this.position.y > GROUND_Y - this.size / 2) { this.position.y = GROUND_Y - this.size / 2; this.velocity.y *= -0.4; this.velocity.x *= 0.8; } }
@@ -1094,11 +1078,25 @@ class PowerUp { constructor(x, y, type) { this.position = createVector(x, y); th
         else if (this.type === 'BubbleGun') { ellipse(0, 0, s, s); noFill(); stroke(255, 255, 255, 150); strokeWeight(1.5); arc(-s*0.2, -s*0.2, s*0.5, s*0.5, 150, 300); }
         else if (this.type === 'ReverseGun') { beginShape(); vertex(s*0.4, 0); vertex(-s*0.1, -s*0.3); vertex(-s*0.1, s*0.3); endShape(CLOSE); rect(-s*0.3, 0, s*0.3, s*0.2); }
         else if (this.type === 'RainbowTrail') { noFill(); strokeWeight(s * 0.15); for(let i=0; i<RAINBOW_COLORS.length; i++) { stroke(RAINBOW_COLORS[i]); arc(0,0, s*0.8, s*0.8, -90 + i*(180/RAINBOW_COLORS.length), -90 + (i+1)*(180/RAINBOW_COLORS.length)); } }
+        // --- Cloud Disguise Powerup Item Display ---
+        else if (this.type === 'CloudDisguise') {
+            noStroke();
+            let c = this.color;
+            fill(c.levels[0], c.levels[1], c.levels[2], 200); // Use the light gray-blue
+            // Draw a few simple overlapping ellipses to represent a cloud
+            ellipse(0, 0, s * 0.9, s * 0.7);
+            ellipse(-s * 0.35, s * 0.15, s * 0.6, s * 0.5);
+            ellipse(s * 0.35, s * 0.1, s * 0.7, s * 0.6);
+            // Optional: Add a subtle highlight
+            fill(255, 255, 255, 80);
+            ellipse(s*0.1, -s*0.1, s*0.4, s*0.3);
+        }
         else { rect(0, 0, s, s); } // Default box
         pop(); noStroke(); }
     isOffscreen() { return this.lifespan <= 0 || this.position.y > height + this.size * 2; }
     checkCollision(plane) { // Uses fixed plane.size
         if (!plane || !plane.isAlive || plane.respawnTimer > 0 || typeof plane.size === 'undefined' || typeof plane.position === 'undefined') return false;
+        // Collision uses plane's actual size, not visual disguise size
         let distanceSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2;
         let radiiSq = (plane.size * 0.8 + this.size / 2)**2; // Use fixed plane size
         return distanceSq < radiiSq;
@@ -1107,16 +1105,27 @@ class PowerUp { constructor(x, y, type) { this.position = createVector(x, y); th
 
 
 // ==========================
-// --- Bomb Class --- (Uses fixed plane.size in checks)
+// --- Bomb Class --- (No changes needed)
 // ==========================
 class Bomb {
     constructor(x, y, ownerId, planeVelocity) { this.position = createVector(x, y); this.velocity = planeVelocity.copy().mult(0.5); this.velocity.y += BOMB_DROP_VELOCITY_Y; this.ownerId = ownerId; this.size = 12; this.fuseTimer = BOMB_FUSE_FRAMES; this.rotation = random(360); this.rotationSpeed = random(-1, 1) * (this.velocity.x > 0 ? 1 : -1); }
     update() { this.position.add(this.velocity); this.velocity.y += GRAVITY_FORCE * 1.5; this.velocity.mult(0.985); this.fuseTimer--; this.rotation += this.rotationSpeed; }
     display() { push(); translate(this.position.x, this.position.y); rotate(this.rotation); fill(50); stroke(80); strokeWeight(1); ellipse(0, 0, this.size * 1.2, this.size); fill(90); noStroke(); triangle(-this.size * 0.6, 0, -this.size * 0.9, -this.size * 0.3, -this.size * 0.9, this.size * 0.3); if (floor(this.fuseTimer / max(5, this.fuseTimer * 0.2)) % 2 === 0) { fill(255, 50 + (BOMB_FUSE_FRAMES - this.fuseTimer)*2, 0); ellipse(this.size * 0.5, 0, 4, 4); } pop(); noStroke(); }
     explode(hutObj) { createExplosion(this.position.x, this.position.y, BOMB_EXPLOSION_PARTICLES, BOMB_EXPLOSION_COLORS, true);
-        for (let plane of [plane1, plane2]) { if (plane.isAlive && typeof plane.size !== 'undefined' && typeof plane.position !== 'undefined') { let distSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2; let radiusSq = (BOMB_EXPLOSION_RADIUS + plane.size * 0.5)**2; if (distSq < radiusSq) { let hitSuccess = plane.hit(true, null); if (hitSuccess && this.ownerId !== plane.id) { if (plane.id === 1) { score2++; } else { score1++; } } } } }
+        for (let plane of [plane1, plane2]) {
+             // Explosion checks use plane's real position/size, ignore disguise
+             if (plane.isAlive && typeof plane.size !== 'undefined' && typeof plane.position !== 'undefined') {
+                 let distSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2;
+                 let radiusSq = (BOMB_EXPLOSION_RADIUS + plane.size * 0.5)**2;
+                 if (distSq < radiusSq) { let hitSuccess = plane.hit(true, null); if (hitSuccess && this.ownerId !== plane.id) { if (plane.id === 1) { score2++; } else { score1++; } } }
+             }
+        }
         if (hutObj && typeof hutObj.x !== 'undefined') { let hutDistSq = (this.position.x - hutObj.x)**2 + (this.position.y - hutObj.y)**2; let collisionThresholdHut = BOMB_EXPLOSION_RADIUS + max(hutObj.w, hutObj.h) * 0.5; if (!hutObj.destroyed && hutDistSq < collisionThresholdHut * collisionThresholdHut) { destroyHut(hutObj); } else if (hutObj.destroyed && hutDistSq < collisionThresholdHut * collisionThresholdHut) { createExplosion(this.position.x, this.position.y, 10, HUT_RUBBLE_COLORS, true); } } }
-    checkCollision(plane) { if (!plane || !plane.isAlive || plane.respawnTimer > 0 || typeof plane.size === 'undefined' || typeof plane.position === 'undefined') return false; let distanceSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2; let radiiSq = (plane.size * 0.7 + this.size / 2)**2; return distanceSq < radiiSq; } // Use fixed plane.size
+    checkCollision(plane) {
+        // Direct bomb collision uses plane's real position/size
+        if (!plane || !plane.isAlive || plane.respawnTimer > 0 || typeof plane.size === 'undefined' || typeof plane.position === 'undefined') return false;
+        let distanceSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2; let radiiSq = (plane.size * 0.7 + this.size / 2)**2; return distanceSq < radiiSq;
+    }
     checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; return (this.position.x > hutObj.x - hutObj.w / 2 && this.position.x < hutObj.x + hutObj.w / 2 && this.position.y > hutObj.y - hutObj.h / 2 && this.position.y < hutObj.y + hutObj.h / 2); }
     checkCollisionGround() { return this.position.y >= GROUND_Y - this.size / 2; }
     isOffscreen() { return (this.fuseTimer < -300 && (this.position.y > height + this.size * 5 || this.position.x < -width || this.position.x > width*2)); }
