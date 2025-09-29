@@ -1,6 +1,5 @@
 // --- START OF FILE sketch.js ---
 
-// --- Game Configuration ---
 const GRAVITY_FORCE = 0.1;
 const THRUST_FORCE = 0.16;
 const LIFT_FACTOR = 0.012;
@@ -820,7 +819,7 @@ class Plane {
         else if (this.activePowerUps['BubbleGun']) { currentCooldown = SHOOT_COOLDOWN_FRAMES * 1.1; }
         // Cloud Disguise does not affect cooldown
 
-        if (this.shootCooldown <= 0 && this.isAlive && canShoot && audioStarted && soundNodesStarted) {
+        if (this.shootCooldown <= 0 && this.isAlive && canShoot) {
             let originOffsetDistance = this.size * 0.9;
             let primarySpawnAngle = this.angle; // Default forward
             let primaryOffsetVector = createVector(originOffsetDistance, 0);
