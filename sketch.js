@@ -40,11 +40,11 @@ let clearTimer = 0;
 const POWERUP_DURATION_FRAMES = 60 * 30; // 30 Seconds
 const POWERUP_FALL_SPEED = 0.5;
 const POWERUP_SIZE = 30;
-// ADDED CloudDisguise
+// ADDED CloudDisguise + Zany powerups
 const POWERUP_TYPES = [
     'RapidFire', 'SpeedBoost', 'Shield', 'TripleShot', 'Bomb',
     'Trampoline', 'ChickenLauncher', 'BubbleGun', 'ReverseGun', 'RainbowTrail',
-    'CloudDisguise'
+    'CloudDisguise', 'BalloonTransform', 'InvertControls', 'SlimeBall', 'CloudLanding'
 ];
 const POWERUP_COLORS = {
     RapidFire: [255, 255, 0],   // Yellow
@@ -57,7 +57,11 @@ const POWERUP_COLORS = {
     BubbleGun: [150, 180, 255],   // Light Sky Blue
     ReverseGun: [255, 165, 0],    // Orange
     RainbowTrail: [255, 0, 255],     // Temp Magenta (trail is rainbow)
-    CloudDisguise: [220, 220, 235] // Light Gray-Blue
+    CloudDisguise: [220, 220, 235], // Light Gray-Blue
+    BalloonTransform: [255, 150, 200], // Pink
+    InvertControls: [150, 0, 150],    // Purple
+    SlimeBall: [50, 200, 50],         // Green
+    CloudLanding: [180, 240, 255]     // Light Blue
 };
 const SHIELD_COLOR = [150, 150, 255, 100];
 const TRIPLE_SHOT_SPREAD_ANGLE = 6;
@@ -85,6 +89,16 @@ const CLOUD_DISGUISE_PUFF_COUNT = 5; // Number of puffs for disguise
 const CLOUD_DISGUISE_SIZE_FACTOR = 1.6; // How large the disguise cloud is relative to plane size
 const CLOUD_DISGUISE_OPACITY = 190; // Base opacity for disguise cloud
 
+// --- Zany Features Config ---
+const MAX_BG_RAINBOWS = 3;
+const MAX_UFOS = 2;
+const UFO_SPEED = 1.5;
+const UFO_SHOOT_COOLDOWN = 180;
+const UFO_BULLET_SPEED = 4;
+const MAX_ELEPHANTS = 3;
+const MAX_UNICORNS = 2;
+const MAX_LIVING_CLOUDS = 2;
+
 // --- Sound Parameters ---
 const BASE_ENGINE_FREQ = 40;
 const MAX_ENGINE_FREQ = 120;
@@ -100,7 +114,14 @@ let plane1, plane2;
 let bullets = [];
 let clouds = [];
 let hut;
-let balloon;
+let balloons = [];
+let bgRainbows = [];
+let ufos = [];
+let ufoBullets = [];
+let elephants = [];
+let unicorns = [];
+let livingClouds = [];
+let kingKong;
 let score1 = 0;
 let score2 = 0;
 let keys = {};
@@ -194,7 +215,16 @@ function setup() {
     plane2 = new Plane(width * 0.9, planeStartY, PLANE2_COLOR_BODY, PLANE2_COLOR_WING, PLANE2_COLOR_ACCENT, CONTROLS_P2, 2);
 
     clouds = []; for (let i = 0; i < MAX_CLOUDS; i++) { clouds.push(new Cloud()); }
-    balloon = new Balloon(width * 0.75, height * 0.4);
+    balloons = [];
+    balloons.push(new Balloon(width * 0.3, height * 0.3));
+    balloons.push(new Balloon(width * 0.6, height * 0.4));
+    balloons.push(new Balloon(width * 0.75, height * 0.5));
+    bgRainbows = []; for (let i = 0; i < MAX_BG_RAINBOWS; i++) { bgRainbows.push(new BgRainbow()); }
+    ufos = []; for (let i = 0; i < MAX_UFOS; i++) { ufos.push(new UfoAlien()); }
+    elephants = []; for (let i = 0; i < MAX_ELEPHANTS; i++) { elephants.push(new Elephant()); }
+    unicorns = []; for (let i = 0; i < MAX_UNICORNS; i++) { unicorns.push(new Unicorn()); }
+    livingClouds = []; for (let i = 0; i < MAX_LIVING_CLOUDS; i++) { livingClouds.push(new LivingCloud()); }
+    kingKong = new KingKong();
     stars = []; for (let i = 0; i < 150; i++) { stars.push({ x: random(width), y: random(height * 0.7), size: random(1, 2.5), brightness: random(150, 255) }); }
 
     keys = {};
@@ -250,6 +280,7 @@ function calculateLayout() {
         if (plane1) plane1.startPos.y = planeStartY;
         if (plane2) plane2.startPos.y = planeStartY;
     }
+    if (kingKong) { kingKong.baseX = width * 0.85; kingKong.x = constrain(kingKong.x, kingKong.baseX - kingKong.walkRange, kingKong.baseX + kingKong.walkRange); kingKong.y = GROUND_Y; }
     updateWeatherVisuals();
 }
 
@@ -276,7 +307,7 @@ function draw() {
         let removeProjectile = false;
         for (let plane of [plane1, plane2]) { if (proj.checkCollision(plane)) { proj.hitEffect(plane); removeProjectile = true; break; } }
         if (removeProjectile) { bullets.splice(i, 1); continue; }
-        if (proj.checkCollision(balloon, true)) { balloon.hit(); removeProjectile = true; if (proj.ownerId === 1) { score1++; } else { score2++; } if (proj instanceof BubbleProjectile && bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) { bubbleEnv.play(bubblePopSound); } }
+        for (let b of balloons) { if (!removeProjectile && proj.checkCollision(b, true)) { b.hit(); removeProjectile = true; if (proj.ownerId === 1) { score1++; } else { score2++; } if (proj instanceof BubbleProjectile && bubblePopSound && bubbleEnv && audioStarted && soundNodesStarted) { bubbleEnv.play(bubblePopSound); } } }
         if (removeProjectile) { bullets.splice(i, 1); continue; }
         if (proj.checkCollisionHut(hut)) { if (!(proj instanceof ChickenProjectile)) { removeProjectile = true; } }
         if (removeProjectile) { bullets.splice(i, 1); continue; }
@@ -311,7 +342,13 @@ function draw() {
 
     // --- Scenery & Environment ---
     for (let cloud of clouds) { cloud.update(); cloud.display(); }
-    balloon.update(); balloon.display();
+    for (let lc of livingClouds) { lc.update(); lc.display(); }
+    for (let ufo of ufos) { ufo.update(); ufo.display(); }
+    for (let i = ufoBullets.length - 1; i >= 0; i--) { ufoBullets[i].update(); ufoBullets[i].display(); let ufoHit = false; for (let plane of [plane1, plane2]) { if (ufoBullets[i].checkCollision(plane)) { ufoBullets[i].hitEffect(plane); ufoHit = true; break; } } if (ufoHit || ufoBullets[i].isOffscreen()) { ufoBullets.splice(i, 1); } }
+    for (let b of balloons) { b.update(); b.display(); }
+    for (let e of elephants) { e.update(); e.display(); }
+    for (let u of unicorns) { u.update(); u.display(); }
+    kingKong.update(); kingKong.display();
     drawHut();
     if (isCurrentlyRaining) { for (let drop of rainDrops) { drop.update(); drop.display(); } }
 
@@ -353,7 +390,7 @@ function mousePressed() {
 function windowResized() { resizeCanvas(windowWidth, windowHeight); calculateLayout(); }
 
 // --- Drawing Functions ---
-function drawBackground() { noStroke(); let bandHeight = height * 0.03; fill(currentSkyTop); rect(width / 2, (height * 0.075) / 2, width, height * 0.075); fill(currentSkyUpperBand); rect(width / 2, height * 0.075 + bandHeight / 2, width, bandHeight); for (let y = height * 0.075 + bandHeight; y < GROUND_Y; y++) { let inter = map(y, height * 0.075 + bandHeight, GROUND_Y, 0, 1); let c = lerpColor(color(currentSkyMidBlue), color(currentSkyLowerBlue), inter); stroke(c); line(0, y, width, y); } noStroke(); fill(255); for (let star of stars) { let brightness = star.brightness * (0.8 + sin(frameCount * 2 + star.x) * 0.2); fill(brightness, isCurrentlyRaining ? 80 : 255); ellipse(star.x, star.y, star.size, star.size); } noStroke(); }
+function drawBackground() { noStroke(); let bandHeight = height * 0.03; fill(currentSkyTop); rect(width / 2, (height * 0.075) / 2, width, height * 0.075); fill(currentSkyUpperBand); rect(width / 2, height * 0.075 + bandHeight / 2, width, bandHeight); for (let y = height * 0.075 + bandHeight; y < GROUND_Y; y++) { let inter = map(y, height * 0.075 + bandHeight, GROUND_Y, 0, 1); let c = lerpColor(color(currentSkyMidBlue), color(currentSkyLowerBlue), inter); stroke(c); line(0, y, width, y); } noStroke(); for (let bgRainbow of bgRainbows) { bgRainbow.update(); bgRainbow.display(); } fill(255); for (let star of stars) { let brightness = star.brightness * (0.8 + sin(frameCount * 2 + star.x) * 0.2); fill(brightness, isCurrentlyRaining ? 80 : 255); ellipse(star.x, star.y, star.size, star.size); } noStroke(); }
 function drawEnvironment() { noStroke(); fill(MOUNTAIN_DISTANT); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y * 0.85); vertex(width * 0.3, GROUND_Y * 0.88); vertex(width * 0.5, GROUND_Y * 0.78); vertex(width * 0.7, GROUND_Y * 0.90); vertex(width * 0.9, GROUND_Y * 0.82); vertex(width, GROUND_Y); endShape(CLOSE); let peak1_baseL = { x: width * 0.05, y: GROUND_Y }; let peak1_top = { x: width * 0.3, y: GROUND_Y * 0.55 }; let peak1_baseR = { x: width * 0.45, y: GROUND_Y }; let peak2_baseL = { x: width * 0.4, y: GROUND_Y }; let peak2_top = { x: width * 0.65, y: GROUND_Y * 0.45 }; let peak2_baseR = { x: width * 0.9, y: GROUND_Y }; fill(MOUNTAIN_DARK); triangle(peak1_baseL.x, peak1_baseL.y, peak1_top.x, peak1_top.y, peak1_baseR.x, peak1_baseR.y); let snowLevel1 = 0.35; fill(SNOW_COLOR); beginShape(); vertex(peak1_top.x, peak1_top.y); let snowP1_L_x = lerp(peak1_top.x, peak1_baseL.x, snowLevel1 * 1.2); let snowP1_L_y = lerp(peak1_top.y, peak1_baseL.y, snowLevel1); vertex(snowP1_L_x, snowP1_L_y); let snowP1_R_x = lerp(peak1_top.x, peak1_baseR.x, snowLevel1 * 1.1); let snowP1_R_y = lerp(peak1_top.y, peak1_baseR.y, snowLevel1); vertex(snowP1_R_x, snowP1_R_y); endShape(CLOSE); fill(MOUNTAIN_LIGHT); triangle(peak2_baseL.x, peak2_baseL.y, peak2_top.x, peak2_top.y, peak2_baseR.x, peak2_baseR.y); let snowLevel2 = 0.4; fill(SNOW_COLOR); beginShape(); vertex(peak2_top.x, peak2_top.y); let snowP2_L_x = lerp(peak2_top.x, peak2_baseL.x, snowLevel2 * 1.15); let snowP2_L_y = lerp(peak2_top.y, peak2_baseL.y, snowLevel2); vertex(snowP2_L_x, snowP2_L_y); let snowP2_R_x = lerp(peak2_top.x, peak2_baseR.x, snowLevel2 * 1.1); let snowP2_R_y = lerp(peak2_top.y, peak2_baseR.y, snowLevel2); vertex(snowP2_R_x, snowP2_R_y); endShape(CLOSE); fill(MOUNTAIN_GREEN); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y); curveVertex(width * 0.15, GROUND_Y * 0.95); vertex(width * 0.2, GROUND_Y * 0.85); curveVertex(width * 0.28, GROUND_Y * 0.98); vertex(width * 0.35, GROUND_Y); vertex(peak1_baseR.x, GROUND_Y); vertex(peak2_baseL.x, GROUND_Y); curveVertex(width * 0.58, GROUND_Y * 0.9); vertex(width * 0.6, GROUND_Y * 0.8); curveVertex(width * 0.75, GROUND_Y); vertex(width * 0.85, GROUND_Y); vertex(peak2_baseR.x, GROUND_Y); vertex(width, GROUND_Y); vertex(width, height); vertex(0, height); endShape(CLOSE); fill(GROUND_COLOR); rect(width / 2, GROUND_Y + (height - GROUND_Y) / 2, width, height - GROUND_Y); strokeWeight(1); for(let i = 0; i < 10; i++) { let lineY = GROUND_Y + (height - GROUND_Y) * (i / 10) * random(0.8, 1.2); let lineCol = lerpColor(color(GROUND_COLOR), color(GROUND_HIGHLIGHT), random(0.3, 0.7)); stroke(red(lineCol), green(lineCol), blue(lineCol), 100); line(0, lineY, width, lineY); } noStroke(); }
 function drawHut() { if (!hut) return; if (hut.destroyed) { if (hut.rubbleDetails && hut.rubbleDetails.length > 0) { push(); translate(hut.x, hut.y + hut.h * 0.2); noStroke(); fill(GROUND_COLOR[0]*0.8, GROUND_COLOR[1]*0.8, GROUND_COLOR[2]*0.8); ellipse(0, GROUND_Y - hut.y - hut.h * 0.2, hut.w * 1.1, hut.h * 0.4); for (const detail of hut.rubbleDetails) { fill(detail.color); rect(detail.x, detail.y - hut.h * 0.2, detail.w, detail.h, detail.r); } pop(); } } else { push(); translate(hut.x, hut.y); noStroke(); fill(HUT_ROOF); triangle(-hut.w / 2 - 5, -hut.h / 2, hut.w / 2 + 5, -hut.h / 2, 0, -hut.h / 2 - hut.h * 0.6); fill(HUT_WALL); rect(0, 0, hut.w, hut.h); fill(HUT_DOOR); rect(-hut.w * 0.25, hut.h * 0.1, hut.w * 0.3, hut.h * 0.7, 3); fill(currentSkyLowerBlue[0]*0.7, currentSkyLowerBlue[1]*0.7, currentSkyLowerBlue[2]*0.7); rect(hut.w * 0.25, -hut.h * 0.1, hut.w * 0.35, hut.h * 0.35, 2); stroke(HUT_ROOF); strokeWeight(2); let winX = hut.w * 0.25; let winY = -hut.h * 0.1; let winW = hut.w * 0.35; let winH = hut.h * 0.35; line(winX - winW/2, winY, winX + winW/2, winY); line(winX, winY - winH/2, winX, winY + winH/2); stroke(HUT_WALL[0] * 0.8, HUT_WALL[1] * 0.8, HUT_WALL[2] * 0.8, 150); strokeWeight(1); for(let i = 0; i < 6; i++) { let lineY = -hut.h/2 + (hut.h / 6) * (i + 0.5); line(-hut.w/2, lineY, hut.w/2, lineY); } noStroke(); pop(); } }
 function drawUI() { textSize(40); textFont('monospace'); fill(SCORE_COLOR); stroke(0); strokeWeight(3); textAlign(LEFT, BOTTOM); text(nf(score1, 2), 20, height - 10); textAlign(RIGHT, BOTTOM); text(nf(score2, 2), width - 20, height - 10); noStroke(); }
@@ -412,6 +449,10 @@ function displayPowerUpStatus(plane, x, y, maxWidth, alignRight = false) {
                  ellipse(-POWERUP_SIZE * 0.3, POWERUP_SIZE * 0.1, POWERUP_SIZE * 0.5, POWERUP_SIZE * 0.4);
                  ellipse(POWERUP_SIZE * 0.3, POWERUP_SIZE * 0.05, POWERUP_SIZE * 0.6, POWERUP_SIZE * 0.5);
             }
+            else if (type === 'BalloonTransform') { noStroke(); let numPB = BALLOON_COLORS.length * 2; for (let i = 0; i < numPB; i++) { fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); arc(0, 0, POWERUP_SIZE*0.9, POWERUP_SIZE*0.9, i*(360/numPB)-90, (i+1)*(360/numPB)-90, PIE); } }
+            else if (type === 'InvertControls') { fill(displayColor[0],displayColor[1],displayColor[2]); stroke(0); strokeWeight(2); rect(0,0,POWERUP_SIZE*0.7,POWERUP_SIZE*0.7,3); noStroke(); fill(255); triangle(-POWERUP_SIZE*0.15,-POWERUP_SIZE*0.25,POWERUP_SIZE*0.15,-POWERUP_SIZE*0.25,0,-POWERUP_SIZE*0.38); triangle(-POWERUP_SIZE*0.15,POWERUP_SIZE*0.25,POWERUP_SIZE*0.15,POWERUP_SIZE*0.25,0,POWERUP_SIZE*0.38); }
+            else if (type === 'SlimeBall') { noStroke(); fill(50,200,50,200); ellipse(0,0,POWERUP_SIZE*0.8,POWERUP_SIZE*0.75); fill(100,240,100,180); ellipse(-POWERUP_SIZE*0.1,-POWERUP_SIZE*0.15,POWERUP_SIZE*0.35,POWERUP_SIZE*0.3); }
+            else if (type === 'CloudLanding') { noStroke(); fill(displayColor[0],displayColor[1],displayColor[2],200); ellipse(0,-POWERUP_SIZE*0.05,POWERUP_SIZE*0.8,POWERUP_SIZE*0.55); ellipse(-POWERUP_SIZE*0.25,POWERUP_SIZE*0.1,POWERUP_SIZE*0.45,POWERUP_SIZE*0.35); ellipse(POWERUP_SIZE*0.25,POWERUP_SIZE*0.05,POWERUP_SIZE*0.55,POWERUP_SIZE*0.45); }
             else { rect(0,0, POWERUP_SIZE, POWERUP_SIZE); } // Default
             pop();
 
@@ -474,6 +515,7 @@ class Plane {
         this.isBubbled = false;
         this.bubbleTimer = 0;
         this.rainbowTrailCounter = 0;
+        this.slimeTimer = 0; // Slimed effect timer
         // NEW: Store multiple active powerups and their timers
         this.activePowerUps = {}; // e.g., { 'Shield': 1800, 'RapidFire': 1500 }
 
@@ -510,6 +552,10 @@ class Plane {
         this.isThrusting = keys[this.controls.thrust] || false;
         this.isTurningLeft = keys[this.controls.left] || false;
         this.isTurningRight = keys[this.controls.right] || false;
+        // InvertControls: swap left/right for this plane
+        if (this.activePowerUps['InvertControls']) {
+            let tmp = this.isTurningLeft; this.isTurningLeft = this.isTurningRight; this.isTurningRight = tmp;
+        }
         if (keys[this.controls.shoot]) {
             this.shoot();
         }
@@ -554,6 +600,9 @@ class Plane {
             // Add other expiration effects if needed
         }
 
+        // --- Slimed Timer Update ---
+        if (this.slimeTimer > 0) { this.slimeTimer--; }
+
 
         // --- Bubble State Update ---
         if (this.isBubbled) {
@@ -577,8 +626,11 @@ class Plane {
         // --- Movement controls only if NOT bubbled ---
         // Cloud disguise does NOT restrict turning
         if (!this.isBubbled) {
-            if (this.isTurningLeft) { this.angle -= TURN_SPEED; }
-            if (this.isTurningRight) { this.angle += TURN_SPEED; }
+            let effectiveTurnSpeed = TURN_SPEED;
+            if (this.activePowerUps['BalloonTransform']) effectiveTurnSpeed *= 0.3;
+            if (this.slimeTimer > 0) effectiveTurnSpeed *= 0.5;
+            if (this.isTurningLeft) { this.angle -= effectiveTurnSpeed; }
+            if (this.isTurningRight) { this.angle += effectiveTurnSpeed; }
         }
 
         // --- Stall Check (only if not grounded and not bubbled)---
@@ -613,6 +665,9 @@ class Plane {
             }
             if (this.isStalled) {
                 currentThrustForce *= STALL_EFFECT_FACTOR; // Reduce thrust if stalled
+            }
+            if (this.slimeTimer > 0) {
+                currentThrustForce *= 0.5; // Slimed: reduce thrust
             }
             if (this.isThrusting) { // Calculate thrust vector if thrusting key is pressed
                 thrustVector = p5.Vector.fromAngle(radians(this.angle), currentThrustForce);
@@ -657,6 +712,8 @@ class Plane {
                 this.applyForce(createVector(0, -liftMagnitude)); // Upward lift force
                 this.applyForce(createVector(0, GRAVITY_FORCE)); // Apply gravity
                 this.velocity.mult(DAMPING_FACTOR); // Apply air drag
+                if (this.activePowerUps['BalloonTransform']) { this.applyForce(createVector(0, -0.08)); this.velocity.mult(0.985); } // Float upward
+                if (this.slimeTimer > 0) { this.velocity.mult(0.97); } // Slimed: extra drag
             } else { // Bubbled in the air
                  this.applyForce(createVector(0, GRAVITY_FORCE * 0.3));
             }
@@ -705,21 +762,33 @@ class Plane {
         else if (this.position.x < -this.size) { this.position.x = width + this.size; }
         if (this.position.y < this.size / 2) { this.position.y = this.size / 2; if (this.velocity.y < 0) { this.velocity.y = 0; } }
 
+        // --- CloudLanding: plane can stand on top of clouds ---
+        if (!this.isOnGround && !this.isBubbled && this.activePowerUps['CloudLanding'] && this.velocity.y > 0) {
+            let allClouds = clouds.concat(livingClouds);
+            for (let c of allClouds) {
+                let dx = abs(this.position.x - c.pos.x);
+                let cloudTop = c.pos.y - c.size * 0.3;
+                let dy = this.position.y - cloudTop;
+                if (dx < c.size * 0.55 && dy >= 0 && dy < 14) {
+                    this.position.y = cloudTop; this.velocity.y = 0; this.isStalled = false; break;
+                }
+            }
+        }
+
         // --- Collisions (Hut, Balloon) if still alive ---
         if (!this.isAlive) return; // Double check aliveness
 
         // Check Hut collision (Cloud Disguise doesn't prevent)
         if (this.checkCollisionHut(hut)) { if (!this.isAlive) return; }
 
-        // Check Balloon collision
-        if (balloon.isAlive) {
-            let distanceSq = (this.position.x - balloon.pos.x)**2 + (this.position.y - balloon.pos.y)**2;
-            let combinedRadiusSq = (this.size * 0.9 + balloon.radius)**2;
+        // Check Balloon collisions
+        for (let b of balloons) {
+            if (!b.isAlive) continue;
+            let distanceSq = (this.position.x - b.pos.x)**2 + (this.position.y - b.pos.y)**2;
+            let combinedRadiusSq = (this.size * 0.9 + b.radius)**2;
             if (distanceSq < combinedRadiusSq) {
-                if (this.activePowerUps['Shield']) { balloon.hit(); if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2); }
-                else if (!this.isBubbled) { // Unshielded, non-bubbled (even if disguised) plane crashes
-                    this.hit(true); return;
-                }
+                if (this.activePowerUps['Shield']) { b.hit(); if(this.activePowerUps['Shield']) this.activePowerUps['Shield'] = max(0, this.activePowerUps['Shield'] - POWERUP_DURATION_FRAMES * 0.2); }
+                else if (!this.isBubbled) { this.hit(true); return; }
             }
         }
 
@@ -788,6 +857,21 @@ class Plane {
                  ellipse(puff.x, puff.y, puff.r * wobbleFactor, puff.r * 0.85 * wobbleFactor);
              }
         }
+        // --- BALLOON TRANSFORM DRAWING ---
+        else if (this.activePowerUps['BalloonTransform']) {
+            let numPanels = BALLOON_COLORS.length * 2;
+            noStroke();
+            for (let i = 0; i < numPanels; i++) {
+                fill(BALLOON_COLORS[i % BALLOON_COLORS.length]);
+                arc(0, 0, this.size * 3.2, this.size * 3.5, i * (360.0/numPanels) - 90, (i+1) * (360.0/numPanels) - 90, PIE);
+            }
+            fill(BALLOON_BASKET); noStroke();
+            rect(0, this.size * 1.9, this.size * 0.9, this.size * 0.7, 2);
+            stroke(BALLOON_ROPE); strokeWeight(1.5); noFill();
+            line(-this.size * 0.3, this.size * 1.5, -this.size * 0.8, this.size * 0.5);
+            line(this.size * 0.3, this.size * 1.5, this.size * 0.8, this.size * 0.5);
+            noStroke();
+        }
         // --- NORMAL PLANE DRAWING ---
         else {
             rotate(this.angle);
@@ -844,6 +928,8 @@ class Plane {
                  bullets.push(new ChickenProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (chickenSound && chickenEnv) { chickenSound.freq(random(700,1000)); chickenEnv.play(chickenSound); } fired = true;
             } else if (this.activePowerUps['BubbleGun']) {
                  bullets.push(new BubbleProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
+            } else if (this.activePowerUps['SlimeBall']) {
+                 bullets.push(new SlimeBallProjectile(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             } else { // Normal bullet (RapidFire/ReverseGun handled by cooldown/angle)
                  bullets.push(new Bullet(primarySpawnPos.x, primarySpawnPos.y, primarySpawnAngle, this.id, this.bodyColor)); if (shootSoundEnv && shootNoise) { shootSoundEnv.play(shootNoise); } fired = true;
             }
@@ -906,7 +992,7 @@ class Plane {
         }
 
         // --- Actual Hit ---
-        this.isAlive = false; this.isOnGround = false; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0;
+        this.isAlive = false; this.isOnGround = false; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0; this.slimeTimer = 0;
         this.activePowerUps = {}; // Clear ALL powerups on hit, including disguise
         this.velocity = createVector(random(-1.5, 1.5), -2.5); this.respawnTimer = RESPAWN_DELAY_FRAMES;
         createExplosion(this.position.x, this.position.y, 35, EXPLOSION_COLORS);
@@ -922,7 +1008,7 @@ class Plane {
 
     respawn() {
         let startY = GROUND_Y - this.size * 0.8; let startX = (this.id === 1) ? width * 0.1 : width * 0.9; this.startPos = createVector(startX, startY);
-        this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = (this.id === 2) ? 180 : 0; this.isAlive = true; this.isOnGround = true; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0;
+        this.position = this.startPos.copy(); this.velocity = createVector(0, 0); this.angle = (this.id === 2) ? 180 : 0; this.isAlive = true; this.isOnGround = true; this.isStalled = false; this.isBubbled = false; this.bubbleTimer = 0; this.slimeTimer = 0;
         this.activePowerUps = {}; // Clear powerups on respawn
         this.shootCooldown = SHOOT_COOLDOWN_FRAMES / 2;
         if (this.engineSound && audioStarted && soundNodesStarted) { this.engineSound.freq(BASE_ENGINE_FREQ, 0.1); this.engineSound.amp(BASE_ENGINE_AMP, 0.1); }
@@ -930,6 +1016,13 @@ class Plane {
 
     collectPowerUp(type) {
         if (!this.isAlive || this.respawnTimer > 0) return;
+        // InvertControls: apply effect to opponent
+        if (type === 'InvertControls') {
+            let opponent = (this.id === 1) ? plane2 : plane1;
+            if (opponent && opponent.isAlive) { opponent.activePowerUps['InvertControls'] = POWERUP_DURATION_FRAMES; }
+            if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); }
+            return;
+        }
         // console.log(`Plane ${this.id} collected ${type}!`);
         this.activePowerUps[type] = POWERUP_DURATION_FRAMES; // Add or refresh timer
 
@@ -1090,6 +1183,10 @@ class PowerUp { constructor(x, y, type) { this.position = createVector(x, y); th
             fill(255, 255, 255, 80);
             ellipse(s*0.1, -s*0.1, s*0.4, s*0.3);
         }
+        else if (this.type === 'BalloonTransform') { noStroke(); let numPB = BALLOON_COLORS.length * 2; for (let i = 0; i < numPB; i++) { fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); arc(0, 0, s*0.9, s*0.9, i*(360/numPB)-90, (i+1)*(360/numPB)-90, PIE); } fill(BALLOON_BASKET); noStroke(); rect(0, s*0.52, s*0.3, s*0.22, 2); }
+        else if (this.type === 'InvertControls') { fill(this.color); rect(0,0,s*0.85,s*0.85,4); fill(255); noStroke(); triangle(-s*0.18,-s*0.3,s*0.18,-s*0.3,0,-s*0.46); triangle(-s*0.18,s*0.3,s*0.18,s*0.3,0,s*0.46); }
+        else if (this.type === 'SlimeBall') { noStroke(); fill(50,200,50); ellipse(0,0,s*0.85,s*0.85); fill(100,240,100); ellipse(-s*0.1,-s*0.2,s*0.38,s*0.35); ellipse(s*0.2,s*0.1,s*0.28,s*0.28); }
+        else if (this.type === 'CloudLanding') { noStroke(); fill(180,240,255,220); ellipse(0,0,s*0.9,s*0.65); ellipse(-s*0.32,s*0.1,s*0.5,s*0.42); ellipse(s*0.32,s*0.05,s*0.62,s*0.52); fill(255,255,180); noStroke(); rect(0,s*0.3,s*0.15,s*0.12,1); }
         else { rect(0, 0, s, s); } // Default box
         pop(); noStroke(); }
     isOffscreen() { return this.lifespan <= 0 || this.position.y > height + this.size * 2; }
@@ -1134,5 +1231,246 @@ class Bomb {
 // --- RainDrop Class --- (Unchanged)
 // ===============================
 class RainDrop { constructor() { this.reset(); } reset() { this.z = random(0.2, 1); this.pos = createVector(random(width * 1.2), random(-height * 0.5, -20)); this.len = map(this.z, 0.2, 1, 4, 12); this.ySpeed = map(this.z, 0.2, 1, 4, 10); this.vel = createVector(0, this.ySpeed); } update() { this.pos.add(this.vel); if (this.pos.y > GROUND_Y + this.len) { this.reset(); } } display() { push(); let alpha = map(this.z, 0.2, 1, 80, 200); let weight = map(this.z, 0.2, 1, 0.5, 1.5); stroke(RAINDROP_COLOR[0], RAINDROP_COLOR[1], RAINDROP_COLOR[2], alpha); strokeWeight(weight); line(this.pos.x, this.pos.y, this.pos.x, this.pos.y + this.len); pop(); noStroke(); } }
+
+// ============================
+// --- BgRainbow Class ---
+// ============================
+class BgRainbow {
+    constructor() { this.x = 0; this.y = 0; this.radius = 100; this.opacity = 0; this.state = 'fadein'; this.timer = 0; this.respawn(); }
+    respawn() { this.x = random(width * 0.15, width * 0.85); this.y = random(height * 0.1, height * 0.55); this.radius = random(width * 0.12, width * 0.28); this.opacity = 0; this.state = 'fadein'; this.timer = random(300, 700); }
+    update() { if (this.state === 'fadein') { this.opacity += 0.25; if (this.opacity >= 28) { this.opacity = 28; this.state = 'stay'; } } else if (this.state === 'stay') { this.timer--; if (this.timer <= 0) this.state = 'fadeout'; } else if (this.state === 'fadeout') { this.opacity -= 0.18; if (this.opacity <= 0) { this.opacity = 0; this.respawn(); } } }
+    display() {
+        if (this.opacity <= 0) return;
+        push(); noFill();
+        for (let i = 0; i < RAINBOW_COLORS.length; i++) {
+            let rc = RAINBOW_COLORS[i];
+            stroke(rc[0], rc[1], rc[2], this.opacity);
+            strokeWeight(this.radius * 0.055);
+            let r = this.radius - i * this.radius * 0.055;
+            if (r > 0) arc(this.x, this.y, r * 2, r * 2, 180, 360);
+        }
+        pop(); noStroke();
+    }
+}
+
+// ============================
+// --- UfoAlien Class ---
+// ============================
+class UfoAlien {
+    constructor() { this.pos = createVector(random(width * 0.1, width * 0.9), random(height * 0.05, height * 0.4)); this.vel = createVector(random(-UFO_SPEED, UFO_SPEED), random(-0.3, 0.3)); if (abs(this.vel.x) < 0.5) this.vel.x = UFO_SPEED; this.bobOffset = random(100); this.shootCooldown = random(UFO_SHOOT_COOLDOWN); this.size = 38; this.glowPhase = random(100); }
+    update() {
+        this.pos.x += this.vel.x;
+        this.pos.y += this.vel.y + sin(frameCount * 0.04 + this.bobOffset) * 0.4;
+        if (this.pos.x < this.size || this.pos.x > width - this.size) this.vel.x *= -1;
+        if (this.pos.y < this.size * 0.5) { this.pos.y = this.size * 0.5; this.vel.y = abs(this.vel.y); }
+        if (this.pos.y > height * 0.58) { this.pos.y = height * 0.58; this.vel.y = -abs(this.vel.y); }
+        this.shootCooldown--;
+        if (this.shootCooldown <= 0) {
+            this.shootCooldown = UFO_SHOOT_COOLDOWN + random(-40, 40);
+            let target = null; let minDist = Infinity;
+            for (let p of [plane1, plane2]) { if (p.isAlive) { let d = dist(this.pos.x, this.pos.y, p.position.x, p.position.y); if (d < minDist) { minDist = d; target = p; } } }
+            if (target) { let angle = atan2(target.position.y - this.pos.y, target.position.x - this.pos.x); /* degrees in DEGREES mode */ ufoBullets.push(new UfoBullet(this.pos.x, this.pos.y + 8, angle)); }
+        }
+    }
+    display() {
+        push(); translate(this.pos.x, this.pos.y);
+        let glow = this.size * 1.5 + sin(frameCount * 0.08 + this.glowPhase) * 4;
+        noStroke(); fill(0, 255, 50, 18 + sin(frameCount * 0.08 + this.glowPhase) * 8);
+        ellipse(0, 6, glow * 2.2, glow * 0.8);
+        fill(160, 160, 190); stroke(200, 200, 230); strokeWeight(1.5);
+        ellipse(0, 8, this.size * 2.1, this.size * 0.55);
+        noStroke(); fill(90, 190, 255, 160);
+        arc(0, 2, this.size * 1.15, this.size * 1.0, 180, 360);
+        fill(210, 235, 255, 70);
+        arc(-this.size * 0.15, -this.size * 0.08, this.size * 0.55, this.size * 0.42, 200, 340);
+        for (let i = 0; i < 5; i++) {
+            let lx = cos(i * 72) * this.size * 0.72;
+            let ly = 10 + sin(i * 72) * this.size * 0.08;
+            fill(floor((frameCount + i * 25) / 8) % 2 === 0 ? color(255, 255, 0) : color(255, 120, 0));
+            noStroke(); ellipse(lx, ly, 5, 5);
+        }
+        pop(); noStroke();
+    }
+}
+
+// ============================
+// --- UfoBullet Class ---
+// ============================
+class UfoBullet {
+    constructor(x, y, angle) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), UFO_BULLET_SPEED); this.size = 9; this.life = 200; this.ownerId = 0; }
+    update() { this.position.add(this.velocity); this.life--; }
+    display() { push(); translate(this.position.x, this.position.y); noStroke(); fill(0, 255, 60, 140); ellipse(0, 0, this.size * 1.6, this.size * 1.6); fill(120, 255, 130); ellipse(0, 0, this.size, this.size); pop(); }
+    isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y < -this.size || this.position.y > height + this.size); }
+    checkCollision(plane) { if (!plane || !plane.isAlive || plane.respawnTimer > 0) return false; let dSq = (this.position.x - plane.position.x)**2 + (this.position.y - plane.position.y)**2; return dSq < (plane.size * 0.85 + this.size * 0.5)**2; }
+    hitEffect(plane) { plane.hit(false, this); }
+}
+
+// ============================
+// --- Elephant Class ---
+// ============================
+class Elephant {
+    constructor() { this.size = random(38, 58); this.speed = random(0.5, 1.4); this.dir = random() > 0.5 ? 1 : -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2; this.y = GROUND_Y; this.fc = random(200); }
+    update() {
+        this.x += this.speed * this.dir; this.fc++;
+        if ((this.dir > 0 && this.x > width + this.size * 3) || (this.dir < 0 && this.x < -this.size * 3)) {
+            this.dir *= -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2;
+            this.size = random(38, 58); this.speed = random(0.5, 1.4);
+        }
+    }
+    display() {
+        push(); translate(this.x, this.y);
+        if (this.dir < 0) scale(-1, 1);
+        let s = this.size; let sw = sin(this.fc * 0.14) * 7;
+        noStroke();
+        fill(155, 155, 165); rect(-s*0.27, -s*0.02, s*0.17, s*0.48+sw, 3); rect(s*0.03, -s*0.02, s*0.17, s*0.48-sw, 3); rect(-s*0.1, -s*0.02, s*0.17, s*0.48-sw*0.5, 3); rect(s*0.2, -s*0.02, s*0.17, s*0.48+sw*0.5, 3);
+        fill(148, 148, 158); ellipse(0, -s*0.38, s*1.18, s*0.72);
+        fill(152, 152, 162); ellipse(s*0.54, -s*0.56, s*0.58, s*0.52);
+        fill(200, 162, 162); ellipse(s*0.31, -s*0.64, s*0.34, s*0.44);
+        fill(0); ellipse(s*0.67, -s*0.65, s*0.07, s*0.07); fill(255); ellipse(s*0.68, -s*0.66, s*0.03, s*0.03);
+        stroke(235, 225, 195); strokeWeight(2); noFill();
+        arc(s*0.64, -s*0.5, s*0.22, s*0.18, -25, 55);
+        noFill(); stroke(148, 148, 158); strokeWeight(s*0.11);
+        beginShape(); curveVertex(s*0.69, -s*0.42); curveVertex(s*0.84, -s*0.18); curveVertex(s*0.88, s*0.1); curveVertex(s*0.73, s*0.22); endShape();
+        noFill(); stroke(148, 148, 158); strokeWeight(2);
+        arc(-s*0.58, -s*0.44, s*0.22, s*0.28, -25, 85);
+        pop(); noStroke();
+    }
+}
+
+// ============================
+// --- KingKong Class ---
+// ============================
+class KingKong {
+    constructor() { this.baseX = width * 0.85; this.x = this.baseX; this.y = GROUND_Y; this.size = 85; this.walkDir = 1; this.walkRange = 80; this.armSwing = 0; this.chestBeat = 0; this.chestBeatTimer = 0; this.roarTimer = 0; }
+    update() {
+        this.x += this.walkDir * 0.28;
+        if (this.x > this.baseX + this.walkRange) this.walkDir = -1;
+        if (this.x < this.baseX - this.walkRange) this.walkDir = 1;
+        this.armSwing = sin(frameCount * 0.045) * 28;
+        if (this.chestBeatTimer > 0) { this.chestBeatTimer--; this.chestBeat = sin(frameCount * 0.45) * 9; } else { this.chestBeat = 0; if (random() < 0.0018) this.chestBeatTimer = 65; }
+        if (this.roarTimer > 0) this.roarTimer--;
+        if (random() < 0.001) this.roarTimer = 45;
+        for (let plane of [plane1, plane2]) {
+            if (plane.isAlive && plane.respawnTimer <= 0) {
+                let d = dist(this.x, this.y - this.size, plane.position.x, plane.position.y);
+                if (d < this.size * 1.4) { let push = p5.Vector.sub(plane.position, createVector(this.x, this.y - this.size)).normalize().mult(3.5); plane.velocity.add(push); plane.hit(false, null); }
+            }
+        }
+    }
+    display() {
+        push(); translate(this.x, this.y); let s = this.size; noStroke();
+        push(); translate(-s*0.5, -s*0.78); rotate(-this.armSwing - 14 + this.chestBeat); fill(42, 32, 25); rect(0, s*0.26, s*0.21, s*0.58, 4); pop();
+        push(); translate(s*0.5, -s*0.78); rotate(this.armSwing + 14 - this.chestBeat); fill(42, 32, 25); rect(0, s*0.26, s*0.21, s*0.58, 4); pop();
+        fill(52, 40, 30); ellipse(0, -s*0.68, s*0.95, s*0.95);
+        fill(72, 52, 40); ellipse(0, -s*0.63, s*0.52, s*0.52);
+        fill(42, 32, 25); rect(-s*0.2, -s*0.2, s*0.3, s*0.5, 3); rect(s*0.2, -s*0.2, s*0.3, s*0.5, 3);
+        fill(46, 34, 27); ellipse(0, -s*1.18, s*0.63, s*0.63);
+        fill(62, 46, 36); ellipse(0, -s*1.13, s*0.38, s*0.34);
+        fill(255, 100, 0); ellipse(-s*0.12, -s*1.24, s*0.12, s*0.12); ellipse(s*0.12, -s*1.24, s*0.12, s*0.12);
+        fill(0); ellipse(-s*0.12, -s*1.24, s*0.06, s*0.06); ellipse(s*0.12, -s*1.24, s*0.06, s*0.06);
+        if (this.roarTimer > 0) {
+            let a = map(this.roarTimer, 0, 45, 0, 1);
+            noStroke(); fill(255, 50, 0, a * 150); ellipse(0, -s*1.03, s*0.24, s*0.2);
+            fill(255, 200, 0, a * 220); textSize(s*0.32); text("!!", s*0.42, -s*1.28);
+        }
+        pop(); noStroke();
+    }
+}
+
+// ============================
+// --- LivingCloud Class ---
+// ============================
+class LivingCloud {
+    constructor() { this.pos = createVector(random(width * 0.05, width * 0.95), random(height * 0.05, height * 0.52)); this.size = random(95, 155); this.puffOffsets = []; this.numPuffs = floor(random(5, 9)); this.opacity = 195; this.speed = 0.4; this.generatePuffs(); }
+    generatePuffs() { this.puffOffsets = []; for (let i = 0; i < this.numPuffs; i++) { this.puffOffsets.push({ x: random(-this.size*0.62, this.size*0.62), y: random(-this.size*0.25, this.size*0.25), r: random(this.size*0.38, this.size*0.78) }); } }
+    update() {
+        let nearestDist = Infinity; let target = null;
+        for (let p of [plane1, plane2]) { if (p.isAlive) { let d = dist(this.pos.x, this.pos.y, p.position.x, p.position.y); if (d < nearestDist) { nearestDist = d; target = p; } } }
+        if (target) { let dir = p5.Vector.sub(target.position, this.pos).normalize().mult(this.speed * 0.28); this.pos.add(dir); }
+        for (let plane of [plane1, plane2]) {
+            if (plane.isAlive && !plane.activePowerUps['CloudDisguise'] && !plane.activePowerUps['CloudLanding']) {
+                let d = dist(this.pos.x, this.pos.y, plane.position.x, plane.position.y);
+                if (d < this.size * 0.48 + plane.size) plane.hit(false, null);
+            }
+        }
+        if (this.pos.x < -this.size * 2) this.pos.x = width + this.size;
+        if (this.pos.x > width + this.size * 2) this.pos.x = -this.size;
+        if (this.pos.y < 5) this.pos.y = height * 0.5;
+        if (this.pos.y > height * 0.62) this.pos.y = height * 0.08;
+    }
+    display() {
+        push(); translate(this.pos.x, this.pos.y); noStroke();
+        fill(CLOUD_SHADOW[0], CLOUD_SHADOW[1], CLOUD_SHADOW[2], this.opacity * 0.48);
+        ellipse(0, this.size * 0.22, this.size * 1.28, this.size * 0.68);
+        fill(208, 198, 212, this.opacity);
+        for (let puff of this.puffOffsets) ellipse(puff.x, puff.y, puff.r, puff.r * 0.84);
+        let ey = -this.size * 0.08;
+        fill(28, 18, 18); ellipse(-this.size*0.16, ey, this.size*0.11, this.size*0.085); ellipse(this.size*0.16, ey, this.size*0.11, this.size*0.085);
+        fill(255); ellipse(-this.size*0.12, ey-1, this.size*0.038, this.size*0.038); ellipse(this.size*0.19, ey-1, this.size*0.038, this.size*0.038);
+        stroke(28, 18, 18); strokeWeight(2.2);
+        line(-this.size*0.22, ey-this.size*0.07, -this.size*0.09, ey-this.size*0.038);
+        line(this.size*0.09, ey-this.size*0.038, this.size*0.22, ey-this.size*0.07);
+        noFill(); arc(0, ey+this.size*0.1, this.size*0.22, this.size*0.14, 0, 180);
+        pop(); noStroke();
+    }
+}
+
+// ============================
+// --- Unicorn Class ---
+// ============================
+class Unicorn {
+    constructor() { this.size = random(28, 42); this.speed = random(1.6, 3.2); this.dir = random() > 0.5 ? 1 : -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2; this.y = GROUND_Y; this.fc = random(200); this.rainbowTrail = []; }
+    update() {
+        this.x += this.speed * this.dir; this.fc++;
+        if ((this.dir > 0 && this.x > width + this.size * 3) || (this.dir < 0 && this.x < -this.size * 3)) {
+            this.dir *= -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2;
+            this.size = random(28, 42); this.speed = random(1.6, 3.2);
+        }
+        if (frameCount % 3 === 0) {
+            let tc = RAINBOW_COLORS[floor(this.fc / 3) % RAINBOW_COLORS.length];
+            this.rainbowTrail.push({ x: this.x, y: this.y - this.size * 0.32, life: 28, color: tc, sz: random(3, 8) });
+        }
+        for (let i = this.rainbowTrail.length - 1; i >= 0; i--) { this.rainbowTrail[i].life--; if (this.rainbowTrail[i].life <= 0) this.rainbowTrail.splice(i, 1); }
+    }
+    display() {
+        push(); noStroke();
+        for (let t of this.rainbowTrail) { let a = map(t.life, 0, 28, 0, 175); fill(t.color[0], t.color[1], t.color[2], a); ellipse(t.x, t.y, t.sz, t.sz); }
+        pop();
+        push(); translate(this.x, this.y);
+        if (this.dir < 0) scale(-1, 1);
+        let s = this.size; let sw = sin(this.fc * 0.22) * 9;
+        noStroke();
+        fill(238, 232, 255); rect(-s*0.22, -s*0.1, s*0.13, s*0.48+sw*0.5, 2); rect(s*0.05, -s*0.1, s*0.13, s*0.48-sw*0.5, 2); rect(-s*0.06, -s*0.1, s*0.13, s*0.48-sw*0.3, 2); rect(s*0.19, -s*0.1, s*0.13, s*0.48+sw*0.3, 2);
+        fill(252, 247, 255); ellipse(0, -s*0.36, s*1.08, s*0.62);
+        fill(248, 243, 255); rect(s*0.33, -s*0.56, s*0.24, s*0.34, 3);
+        ellipse(s*0.48, -s*0.73, s*0.38, s*0.33);
+        for (let i = 0; i < 4; i++) { let mc = RAINBOW_COLORS[(floor(this.fc/5)+i) % RAINBOW_COLORS.length]; stroke(mc[0],mc[1],mc[2],195); strokeWeight(2.5); noFill(); arc(s*0.28+i*2.5, -s*0.56-i*2.5, s*0.28+i*4.5, s*0.38+i*2.5, 180, 360); }
+        noStroke(); fill(255, 225, 255); stroke(RAINBOW_COLORS[floor(this.fc/7) % RAINBOW_COLORS.length]); strokeWeight(1.2);
+        triangle(s*0.44, -s*0.88, s*0.53, -s*0.88, s*0.485, -s*1.1);
+        noStroke(); fill(0); ellipse(s*0.6, -s*0.77, s*0.07, s*0.07); fill(255); ellipse(s*0.615, -s*0.78, s*0.028, s*0.028);
+        for (let i = 0; i < 4; i++) { let tc = RAINBOW_COLORS[(floor(this.fc/6)+i) % RAINBOW_COLORS.length]; stroke(tc[0],tc[1],tc[2]); strokeWeight(2.5-i*0.35); noFill(); arc(-s*0.54+i, -s*0.34-i*2, s*0.28, s*0.38+i*5, -28+i*10, 88+i*10); }
+        pop(); noStroke();
+    }
+}
+
+// ============================
+// --- SlimeBallProjectile Class ---
+// ============================
+class SlimeBallProjectile {
+    constructor(x, y, angle, ownerId) { this.position = createVector(x, y); this.velocity = p5.Vector.fromAngle(radians(angle), BULLET_SPEED * 0.68); this.ownerId = ownerId; this.size = 14; this.life = 130; this.gravity = GRAVITY_FORCE * 0.62; this.wobble = random(100); }
+    update() { this.velocity.y += this.gravity; this.position.add(this.velocity); this.life--; }
+    display() { push(); translate(this.position.x, this.position.y); let w = sin(frameCount*0.28+this.wobble)*2; noStroke(); fill(30,178,30,195); ellipse(0, 0, this.size+w, this.size*0.9); fill(80,228,80,175); ellipse(-this.size*0.18, -this.size*0.18, this.size*0.44, this.size*0.38); fill(30,178,30,148); ellipse(this.size*0.28, this.size*0.48, this.size*0.24, this.size*0.28); pop(); noStroke(); }
+    isOffscreen() { return (this.life <= 0 || this.position.x < -this.size || this.position.x > width + this.size || this.position.y > height + this.size); }
+    checkCollision(target, targetIsBalloon = false) {
+        if (!target || typeof target.isAlive === 'undefined' || !target.isAlive) return false;
+        if (target instanceof Plane && (target.id === this.ownerId || target.respawnTimer > 0)) return false;
+        if (!target.position) return false;
+        let targetRadius = targetIsBalloon ? target.radius : target.size * 0.8;
+        let dSq = (this.position.x - target.position.x)**2 + (this.position.y - target.position.y)**2;
+        return dSq < (targetRadius + this.size * 0.5)**2;
+    }
+    hitEffect(plane) { plane.slimeTimer = 60 * 5; } // 5 seconds slimed, does not kill
+    checkCollisionHut(hutObj) { if (!hutObj || hutObj.destroyed) return false; return (this.position.x > hutObj.x - hutObj.w/2 && this.position.x < hutObj.x + hutObj.w/2 && this.position.y > hutObj.y - hutObj.h/2 && this.position.y < hutObj.y + hutObj.h/2); }
+}
 
 // --- END OF FILE sketch.js ---
