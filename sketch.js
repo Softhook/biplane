@@ -97,7 +97,6 @@ const CLOUD_DISGUISE_SIZE_FACTOR = 1.6; // How large the disguise cloud is relat
 const CLOUD_DISGUISE_OPACITY = 190; // Base opacity for disguise cloud
 
 // --- Zany Features Config ---
-const MAX_BG_RAINBOWS = 3;
 const UFO_SPEED = 1.5;
 const UFO_SHOOT_COOLDOWN = 180;
 const UFO_BULLET_SPEED = 4;
@@ -119,7 +118,6 @@ let bullets = [];
 let clouds = [];
 let hut;
 let balloons = [];
-let bgRainbows = [];
 let ufos = [];
 let ufoBullets = [];
 let elephants = [];
@@ -221,7 +219,6 @@ function setup() {
     clouds = []; for (let i = 0; i < MAX_CLOUDS; i++) { clouds.push(new Cloud()); }
     balloons = [];
     balloons.push(new Balloon(width * 0.5, height * 0.4));
-    bgRainbows = []; for (let i = 0; i < MAX_BG_RAINBOWS; i++) { bgRainbows.push(new BgRainbow()); }
     ufos = []; ufoBullets = [];
     elephants = [];
     unicorns = [];
@@ -371,20 +368,33 @@ function draw() {
 // --- Draw Intro Screen --- (Unchanged)
 function drawIntroScreen() { drawBackground(); drawEnvironment(); if (hut) { hut.destroyed = false; hut.rubbleDetails = null; } drawHut(); fill(0, 0, 0, 150); rect(width / 2, height / 2, width, height); textFont('monospace'); fill(255, 215, 0); stroke(0); strokeWeight(4); textSize(min(width * 0.1, height * 0.15)); textAlign(CENTER, CENTER); text("Biplane Battle", width / 2, height * 0.2); noStroke(); fill(240); textSize(min(width * 0.025, height * 0.04)); let instrY = height * 0.45; let lineSpacing = height * 0.05; let col1X = width * 0.3; let col2X = width * 0.7; fill(PLANE1_COLOR_BODY); text("Player 1", col1X, instrY); fill(240); text("W: Thrust", col1X, instrY + lineSpacing); text("A: Turn Left", col1X, instrY + lineSpacing * 2); text("D: Turn Right", col1X, instrY + lineSpacing * 3); text("S: Shoot/Drop", col1X, instrY + lineSpacing * 4); fill(PLANE2_COLOR_BODY); text("Player 2", col2X, instrY); fill(240); text("Up Arrow: Thrust", col2X, instrY + lineSpacing); text("Left Arrow: Turn Left", col2X, instrY + lineSpacing * 2); text("Right Arrow: Turn Right", col2X, instrY + lineSpacing * 3); text("Down Arrow: Shoot/Drop", col2X, instrY + lineSpacing * 4); fill(255, 255, 100); textSize(min(width * 0.03, height * 0.05)); if (floor(frameCount / 20) % 2 === 0) { text("Press any key to start", width / 2, height * 0.85); } noStroke(); }
 
+function tryStartSoundNodes() {
+    if (!audioStarted || soundNodesStarted || gameState !== 'playing') return;
+    try {
+        engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start();
+        boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start();
+        soundNodesStarted = true;
+        /* console.log("Sound nodes started."); */
+    } catch (e) {
+        console.error("Error starting sound nodes:", e);
+    }
+}
+
 // --- Input Handling ---
 function keyPressed() {
     if (gameState === 'intro') {
         gameState = 'playing'; if (hut) { hut.destroyed = false; hut.rubbleDetails = null; }
-        if (audioStarted && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started via key press."); */ } catch (e) { console.error("Error starting sound nodes:", e); } }
-        else if (!audioStarted) { /* console.log("Key pressed, waiting for audio context."); */ } return;
+        if (audioStarted) { tryStartSoundNodes(); }
+        else { /* console.log("Key pressed, waiting for audio context."); */ }
+        return;
     } if (gameState === 'playing') { keys[keyCode] = true; }
 }
 function keyReleased() { if (gameState === 'playing') { keys[keyCode] = false; } }
 
 // --- Fullscreen & Audio Start ---
 function mousePressed() {
-  if (!audioStarted && getAudioContext().state !== 'running') { userStartAudio().then(() => { if (getAudioContext().state === 'running') { /* console.log("Audio Context running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (mouse press)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } } else { console.error("Audio context failed to resume."); } }).catch(e => { console.error("Error starting audio:", e); }); }
-  else if (!audioStarted && getAudioContext().state === 'running') { /* console.log("Audio Context already running."); */ audioStarted = true; if (gameState === 'playing' && !soundNodesStarted) { try { engineSound1.start(); engineSound2.start(); shootNoise.start(); explosionNoise.start(); bombExplosionNoise.start(); boingSound.start(); chickenSound.start(); bubblePopSound.start(); rainbowSparkleSound.start(); cloudPoofSound.start(); soundNodesStarted = true; /* console.log("Sound nodes started (pre-existing context)."); */ } catch (e) { console.error("Error starting sound nodes:", e); } } }
+  if (!audioStarted && getAudioContext().state !== 'running') { userStartAudio().then(() => { if (getAudioContext().state === 'running') { /* console.log("Audio Context running."); */ audioStarted = true; tryStartSoundNodes(); } else { console.error("Audio context failed to resume."); } }).catch(e => { console.error("Error starting audio:", e); }); }
+  else if (!audioStarted && getAudioContext().state === 'running') { /* console.log("Audio Context already running."); */ audioStarted = true; tryStartSoundNodes(); }
   if (mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) { let fs = fullscreen(); fullscreen(!fs); }
 }
 
@@ -392,7 +402,7 @@ function mousePressed() {
 function windowResized() { resizeCanvas(windowWidth, windowHeight); calculateLayout(); }
 
 // --- Drawing Functions ---
-function drawBackground() { noStroke(); let bandHeight = height * 0.03; fill(currentSkyTop); rect(width / 2, (height * 0.075) / 2, width, height * 0.075); fill(currentSkyUpperBand); rect(width / 2, height * 0.075 + bandHeight / 2, width, bandHeight); for (let y = height * 0.075 + bandHeight; y < GROUND_Y; y++) { let inter = map(y, height * 0.075 + bandHeight, GROUND_Y, 0, 1); let c = lerpColor(color(currentSkyMidBlue), color(currentSkyLowerBlue), inter); stroke(c); line(0, y, width, y); } noStroke(); for (let bgRainbow of bgRainbows) { bgRainbow.update(); bgRainbow.display(); } fill(255); for (let star of stars) { let brightness = star.brightness * (0.8 + sin(frameCount * 2 + star.x) * 0.2); fill(brightness, isCurrentlyRaining ? 80 : 255); ellipse(star.x, star.y, star.size, star.size); } noStroke(); }
+function drawBackground() { noStroke(); let bandHeight = height * 0.03; fill(currentSkyTop); rect(width / 2, (height * 0.075) / 2, width, height * 0.075); fill(currentSkyUpperBand); rect(width / 2, height * 0.075 + bandHeight / 2, width, bandHeight); for (let y = height * 0.075 + bandHeight; y < GROUND_Y; y++) { let inter = map(y, height * 0.075 + bandHeight, GROUND_Y, 0, 1); let c = lerpColor(color(currentSkyMidBlue), color(currentSkyLowerBlue), inter); stroke(c); line(0, y, width, y); } noStroke(); fill(255); for (let star of stars) { let brightness = star.brightness * (0.8 + sin(frameCount * 2 + star.x) * 0.2); fill(brightness, isCurrentlyRaining ? 80 : 255); ellipse(star.x, star.y, star.size, star.size); } noStroke(); }
 function drawEnvironment() { noStroke(); fill(MOUNTAIN_DISTANT); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y * 0.85); vertex(width * 0.3, GROUND_Y * 0.88); vertex(width * 0.5, GROUND_Y * 0.78); vertex(width * 0.7, GROUND_Y * 0.90); vertex(width * 0.9, GROUND_Y * 0.82); vertex(width, GROUND_Y); endShape(CLOSE); let peak1_baseL = { x: width * 0.05, y: GROUND_Y }; let peak1_top = { x: width * 0.3, y: GROUND_Y * 0.55 }; let peak1_baseR = { x: width * 0.45, y: GROUND_Y }; let peak2_baseL = { x: width * 0.4, y: GROUND_Y }; let peak2_top = { x: width * 0.65, y: GROUND_Y * 0.45 }; let peak2_baseR = { x: width * 0.9, y: GROUND_Y }; fill(MOUNTAIN_DARK); triangle(peak1_baseL.x, peak1_baseL.y, peak1_top.x, peak1_top.y, peak1_baseR.x, peak1_baseR.y); let snowLevel1 = 0.35; fill(SNOW_COLOR); beginShape(); vertex(peak1_top.x, peak1_top.y); let snowP1_L_x = lerp(peak1_top.x, peak1_baseL.x, snowLevel1 * 1.2); let snowP1_L_y = lerp(peak1_top.y, peak1_baseL.y, snowLevel1); vertex(snowP1_L_x, snowP1_L_y); let snowP1_R_x = lerp(peak1_top.x, peak1_baseR.x, snowLevel1 * 1.1); let snowP1_R_y = lerp(peak1_top.y, peak1_baseR.y, snowLevel1); vertex(snowP1_R_x, snowP1_R_y); endShape(CLOSE); fill(MOUNTAIN_LIGHT); triangle(peak2_baseL.x, peak2_baseL.y, peak2_top.x, peak2_top.y, peak2_baseR.x, peak2_baseR.y); let snowLevel2 = 0.4; fill(SNOW_COLOR); beginShape(); vertex(peak2_top.x, peak2_top.y); let snowP2_L_x = lerp(peak2_top.x, peak2_baseL.x, snowLevel2 * 1.15); let snowP2_L_y = lerp(peak2_top.y, peak2_baseL.y, snowLevel2); vertex(snowP2_L_x, snowP2_L_y); let snowP2_R_x = lerp(peak2_top.x, peak2_baseR.x, snowLevel2 * 1.1); let snowP2_R_y = lerp(peak2_top.y, peak2_baseR.y, snowLevel2); vertex(snowP2_R_x, snowP2_R_y); endShape(CLOSE); fill(MOUNTAIN_GREEN); beginShape(); vertex(0, GROUND_Y); vertex(width * 0.1, GROUND_Y); curveVertex(width * 0.15, GROUND_Y * 0.95); vertex(width * 0.2, GROUND_Y * 0.85); curveVertex(width * 0.28, GROUND_Y * 0.98); vertex(width * 0.35, GROUND_Y); vertex(peak1_baseR.x, GROUND_Y); vertex(peak2_baseL.x, GROUND_Y); curveVertex(width * 0.58, GROUND_Y * 0.9); vertex(width * 0.6, GROUND_Y * 0.8); curveVertex(width * 0.75, GROUND_Y); vertex(width * 0.85, GROUND_Y); vertex(peak2_baseR.x, GROUND_Y); vertex(width, GROUND_Y); vertex(width, height); vertex(0, height); endShape(CLOSE); fill(GROUND_COLOR); rect(width / 2, GROUND_Y + (height - GROUND_Y) / 2, width, height - GROUND_Y); strokeWeight(1); for(let i = 0; i < 10; i++) { let lineY = GROUND_Y + (height - GROUND_Y) * (i / 10) * random(0.8, 1.2); let lineCol = lerpColor(color(GROUND_COLOR), color(GROUND_HIGHLIGHT), random(0.3, 0.7)); stroke(red(lineCol), green(lineCol), blue(lineCol), 100); line(0, lineY, width, lineY); } noStroke(); }
 function drawHut() { if (!hut) return; if (hut.destroyed) { if (hut.rubbleDetails && hut.rubbleDetails.length > 0) { push(); translate(hut.x, hut.y + hut.h * 0.2); noStroke(); fill(GROUND_COLOR[0]*0.8, GROUND_COLOR[1]*0.8, GROUND_COLOR[2]*0.8); ellipse(0, GROUND_Y - hut.y - hut.h * 0.2, hut.w * 1.1, hut.h * 0.4); for (const detail of hut.rubbleDetails) { fill(detail.color); rect(detail.x, detail.y - hut.h * 0.2, detail.w, detail.h, detail.r); } pop(); } } else { push(); translate(hut.x, hut.y); noStroke(); fill(HUT_ROOF); triangle(-hut.w / 2 - 5, -hut.h / 2, hut.w / 2 + 5, -hut.h / 2, 0, -hut.h / 2 - hut.h * 0.6); fill(HUT_WALL); rect(0, 0, hut.w, hut.h); fill(HUT_DOOR); rect(-hut.w * 0.25, hut.h * 0.1, hut.w * 0.3, hut.h * 0.7, 3); fill(currentSkyLowerBlue[0]*0.7, currentSkyLowerBlue[1]*0.7, currentSkyLowerBlue[2]*0.7); rect(hut.w * 0.25, -hut.h * 0.1, hut.w * 0.35, hut.h * 0.35, 2); stroke(HUT_ROOF); strokeWeight(2); let winX = hut.w * 0.25; let winY = -hut.h * 0.1; let winW = hut.w * 0.35; let winH = hut.h * 0.35; line(winX - winW/2, winY, winX + winW/2, winY); line(winX, winY - winH/2, winX, winY + winH/2); stroke(HUT_WALL[0] * 0.8, HUT_WALL[1] * 0.8, HUT_WALL[2] * 0.8, 150); strokeWeight(1); for(let i = 0; i < 6; i++) { let lineY = -hut.h/2 + (hut.h / 6) * (i + 0.5); line(-hut.w/2, lineY, hut.w/2, lineY); } noStroke(); pop(); } }
 function drawUI() { textSize(40); textFont('monospace'); fill(SCORE_COLOR); stroke(0); strokeWeight(3); textAlign(LEFT, BOTTOM); text(nf(score1, 2), 20, height - 10); textAlign(RIGHT, BOTTOM); text(nf(score2, 2), width - 20, height - 10); noStroke(); }
@@ -1245,27 +1255,6 @@ class Bomb {
 // --- RainDrop Class --- (Unchanged)
 // ===============================
 class RainDrop { constructor() { this.reset(); } reset() { this.z = random(0.2, 1); this.pos = createVector(random(width * 1.2), random(-height * 0.5, -20)); this.len = map(this.z, 0.2, 1, 4, 12); this.ySpeed = map(this.z, 0.2, 1, 4, 10); this.vel = createVector(0, this.ySpeed); } update() { this.pos.add(this.vel); if (this.pos.y > GROUND_Y + this.len) { this.reset(); } } display() { push(); let alpha = map(this.z, 0.2, 1, 80, 200); let weight = map(this.z, 0.2, 1, 0.5, 1.5); stroke(RAINDROP_COLOR[0], RAINDROP_COLOR[1], RAINDROP_COLOR[2], alpha); strokeWeight(weight); line(this.pos.x, this.pos.y, this.pos.x, this.pos.y + this.len); pop(); noStroke(); } }
-
-// ============================
-// --- BgRainbow Class ---
-// ============================
-class BgRainbow {
-    constructor() { this.x = 0; this.y = 0; this.radius = 100; this.opacity = 0; this.state = 'fadein'; this.timer = 0; this.respawn(); }
-    respawn() { this.x = random(width * 0.15, width * 0.85); this.y = random(height * 0.1, height * 0.55); this.radius = random(width * 0.12, width * 0.28); this.opacity = 0; this.state = 'fadein'; this.timer = random(300, 700); }
-    update() { if (this.state === 'fadein') { this.opacity += 0.25; if (this.opacity >= 28) { this.opacity = 28; this.state = 'stay'; } } else if (this.state === 'stay') { this.timer--; if (this.timer <= 0) this.state = 'fadeout'; } else if (this.state === 'fadeout') { this.opacity -= 0.18; if (this.opacity <= 0) { this.opacity = 0; this.respawn(); } } }
-    display() {
-        if (this.opacity <= 0) return;
-        push(); noFill();
-        for (let i = 0; i < RAINBOW_COLORS.length; i++) {
-            let rc = RAINBOW_COLORS[i];
-            stroke(rc[0], rc[1], rc[2], this.opacity);
-            strokeWeight(this.radius * 0.055);
-            let r = this.radius - i * this.radius * 0.055;
-            if (r > 0) arc(this.x, this.y, r * 2, r * 2, 180, 360);
-        }
-        pop(); noStroke();
-    }
-}
 
 // ============================
 // --- UfoAlien Class ---
