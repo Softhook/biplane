@@ -40,11 +40,12 @@ let clearTimer = 0;
 const POWERUP_DURATION_FRAMES = 60 * 30; // 30 Seconds
 const POWERUP_FALL_SPEED = 0.5;
 const POWERUP_SIZE = 30;
-// ADDED CloudDisguise + Zany powerups
+// ADDED CloudDisguise + Zany powerups + Summon powerups
 const POWERUP_TYPES = [
     'RapidFire', 'SpeedBoost', 'Shield', 'TripleShot', 'Bomb',
     'Trampoline', 'ChickenLauncher', 'BubbleGun', 'ReverseGun', 'RainbowTrail',
-    'CloudDisguise', 'BalloonTransform', 'InvertControls', 'SlimeBall', 'CloudLanding'
+    'CloudDisguise', 'BalloonTransform', 'InvertControls', 'SlimeBall', 'CloudLanding',
+    'MultiBalloon', 'SummonKingKong', 'SummonUFO', 'ElephantStampede', 'UnicornGallop', 'SummonLivingCloud'
 ];
 const POWERUP_COLORS = {
     RapidFire: [255, 255, 0],   // Yellow
@@ -61,7 +62,13 @@ const POWERUP_COLORS = {
     BalloonTransform: [255, 150, 200], // Pink
     InvertControls: [150, 0, 150],    // Purple
     SlimeBall: [50, 200, 50],         // Green
-    CloudLanding: [180, 240, 255]     // Light Blue
+    CloudLanding: [180, 240, 255],    // Light Blue
+    MultiBalloon: [255, 200, 50],     // Gold
+    SummonKingKong: [60, 40, 20],     // Dark Brown
+    SummonUFO: [0, 200, 120],         // Alien Green
+    ElephantStampede: [150, 150, 165],// Gray
+    UnicornGallop: [230, 100, 220],   // Pink/Purple
+    SummonLivingCloud: [200, 190, 210]// Purple-gray
 };
 const SHIELD_COLOR = [150, 150, 255, 100];
 const TRIPLE_SHOT_SPREAD_ANGLE = 6;
@@ -91,13 +98,10 @@ const CLOUD_DISGUISE_OPACITY = 190; // Base opacity for disguise cloud
 
 // --- Zany Features Config ---
 const MAX_BG_RAINBOWS = 3;
-const MAX_UFOS = 2;
 const UFO_SPEED = 1.5;
 const UFO_SHOOT_COOLDOWN = 180;
 const UFO_BULLET_SPEED = 4;
-const MAX_ELEPHANTS = 3;
-const MAX_UNICORNS = 2;
-const MAX_LIVING_CLOUDS = 2;
+const SUMMON_DURATION_FRAMES = 60 * 20; // 20 seconds for summoned entities
 
 // --- Sound Parameters ---
 const BASE_ENGINE_FREQ = 40;
@@ -216,15 +220,13 @@ function setup() {
 
     clouds = []; for (let i = 0; i < MAX_CLOUDS; i++) { clouds.push(new Cloud()); }
     balloons = [];
-    balloons.push(new Balloon(width * 0.3, height * 0.3));
-    balloons.push(new Balloon(width * 0.6, height * 0.4));
-    balloons.push(new Balloon(width * 0.75, height * 0.5));
+    balloons.push(new Balloon(width * 0.5, height * 0.4));
     bgRainbows = []; for (let i = 0; i < MAX_BG_RAINBOWS; i++) { bgRainbows.push(new BgRainbow()); }
-    ufos = []; for (let i = 0; i < MAX_UFOS; i++) { ufos.push(new UfoAlien()); }
-    elephants = []; for (let i = 0; i < MAX_ELEPHANTS; i++) { elephants.push(new Elephant()); }
-    unicorns = []; for (let i = 0; i < MAX_UNICORNS; i++) { unicorns.push(new Unicorn()); }
-    livingClouds = []; for (let i = 0; i < MAX_LIVING_CLOUDS; i++) { livingClouds.push(new LivingCloud()); }
-    kingKong = new KingKong();
+    ufos = []; ufoBullets = [];
+    elephants = [];
+    unicorns = [];
+    livingClouds = [];
+    kingKong = null;
     stars = []; for (let i = 0; i < 150; i++) { stars.push({ x: random(width), y: random(height * 0.7), size: random(1, 2.5), brightness: random(150, 255) }); }
 
     keys = {};
@@ -280,7 +282,7 @@ function calculateLayout() {
         if (plane1) plane1.startPos.y = planeStartY;
         if (plane2) plane2.startPos.y = planeStartY;
     }
-    if (kingKong) { kingKong.baseX = width * 0.85; kingKong.x = constrain(kingKong.x, kingKong.baseX - kingKong.walkRange, kingKong.baseX + kingKong.walkRange); kingKong.y = GROUND_Y; }
+    if (kingKong) { kingKong.baseX = width * 0.5; kingKong.x = constrain(kingKong.x, kingKong.baseX - kingKong.walkRange, kingKong.baseX + kingKong.walkRange); kingKong.y = GROUND_Y; }
     updateWeatherVisuals();
 }
 
@@ -342,13 +344,13 @@ function draw() {
 
     // --- Scenery & Environment ---
     for (let cloud of clouds) { cloud.update(); cloud.display(); }
-    for (let lc of livingClouds) { lc.update(); lc.display(); }
-    for (let ufo of ufos) { ufo.update(); ufo.display(); }
+    for (let i = livingClouds.length - 1; i >= 0; i--) { livingClouds[i].update(); if (livingClouds[i].expired) { livingClouds.splice(i, 1); continue; } livingClouds[i].display(); }
+    for (let i = ufos.length - 1; i >= 0; i--) { ufos[i].update(); if (ufos[i].expired) { ufos.splice(i, 1); continue; } ufos[i].display(); }
     for (let i = ufoBullets.length - 1; i >= 0; i--) { ufoBullets[i].update(); ufoBullets[i].display(); let ufoHit = false; for (let plane of [plane1, plane2]) { if (ufoBullets[i].checkCollision(plane)) { ufoBullets[i].hitEffect(plane); ufoHit = true; break; } } if (ufoHit || ufoBullets[i].isOffscreen()) { ufoBullets.splice(i, 1); } }
-    for (let b of balloons) { b.update(); b.display(); }
-    for (let e of elephants) { e.update(); e.display(); }
-    for (let u of unicorns) { u.update(); u.display(); }
-    kingKong.update(); kingKong.display();
+    for (let i = balloons.length - 1; i >= 0; i--) { balloons[i].update(); if (balloons[i].expired) { balloons.splice(i, 1); continue; } balloons[i].display(); }
+    for (let i = elephants.length - 1; i >= 0; i--) { elephants[i].update(); if (elephants[i].expired) { elephants.splice(i, 1); continue; } elephants[i].display(); }
+    for (let i = unicorns.length - 1; i >= 0; i--) { unicorns[i].update(); if (unicorns[i].expired) { unicorns.splice(i, 1); continue; } unicorns[i].display(); }
+    if (kingKong) { kingKong.update(); if (kingKong.expired) { kingKong = null; } else { kingKong.display(); } }
     drawHut();
     if (isCurrentlyRaining) { for (let drop of rainDrops) { drop.update(); drop.display(); } }
 
@@ -881,10 +883,10 @@ class Plane {
             fill(red(this.wingColor)*0.8, green(this.wingColor)*0.8, blue(this.wingColor)*0.8); beginShape(); for(let p of pp.bottomWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.accentColor); beginShape(); for(let p of pp.tailplane) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.fuselage) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.wingColor); beginShape(); for(let p of pp.topWing) { vertex(p.x, p.y); } endShape(CLOSE); fill(this.bodyColor); beginShape(); for(let p of pp.rudder) { vertex(p.x, p.y); } endShape(CLOSE); noFill(); stroke(0, 150); strokeWeight(1.5); if (pp.cockpit.length >= 2) { beginShape(); curveVertex(pp.cockpit[0].x, pp.cockpit[0].y); for(let p of pp.cockpit) { curveVertex(p.x, p.y); } curveVertex(pp.cockpit[pp.cockpit.length - 1].x, pp.cockpit[pp.cockpit.length - 1].y); endShape(); }
             let wheelDrawThreshold = GROUND_Y - this.size * 3; if (this.isOnGround || (!this.isOnGround && this.position.y > wheelDrawThreshold) || (!this.isOnGround && this.velocity.y > 0.3)) { fill(40); noStroke(); ellipse(pp.wheels[0].x, pp.wheels[0].y, pp.wheelRadius * 2, pp.wheelRadius * 2); ellipse(pp.wheels[1].x, pp.wheels[1].y, pp.wheelRadius * 2, pp.wheelRadius * 2); stroke(60); strokeWeight(3); line(pp.wheels[0].x, pp.wheels[0].y - pp.wheelRadius, pp.bottomWing[1].x * 0.8, pp.bottomWing[1].y - this.size * 0.1); line(pp.wheels[1].x, pp.wheels[1].y - pp.wheelRadius, pp.bottomWing[2].x * 0.8, pp.bottomWing[2].y - this.size * 0.1); }
             noStroke(); let noseX = this.size * 0.85; let propHeight = this.size * 0.9; let propWidthRunning = this.size * 0.15; let propWidthStopped = this.size * 0.05; let engineRunning = (this.isThrusting || (this.velocity.magSq() > 0.5)) && !this.isBubbled; if (engineRunning) { fill(PROPELLER_BLUR_COLOR); ellipse(noseX, 0, propWidthRunning, propHeight); } else { fill(PROPELLER_STOPPED_COLOR); rect(noseX, 0, propWidthStopped, propHeight); } fill(this.accentColor); ellipse(noseX, 0, this.size * 0.2, this.size * 0.2);
-            // --- Display Active Powerup Effects (Shield, Bubble) ---
-            if (this.activePowerUps['Shield']) { let shieldTimer = this.activePowerUps['Shield']; let shieldAlpha = SHIELD_COLOR[3] * (0.7 + sin(frameCount * 4) * 0.3); if (shieldTimer < 120 && floor(frameCount / 5) % 2 === 0) { shieldAlpha = 0; } fill(SHIELD_COLOR[0], SHIELD_COLOR[1], SHIELD_COLOR[2], shieldAlpha); noStroke(); ellipse(0, 0, this.size * 2.8, this.size * 2.2); }
-            if (this.isBubbled) { let bubbleAlpha = BUBBLE_FILL_COLOR[3] * (0.8 + sin(frameCount * 2) * 0.2); fill(BUBBLE_FILL_COLOR[0], BUBBLE_FILL_COLOR[1], BUBBLE_FILL_COLOR[2], bubbleAlpha); strokeWeight(2); stroke(BUBBLE_STROKE_COLOR[0],BUBBLE_STROKE_COLOR[1],BUBBLE_STROKE_COLOR[2], BUBBLE_STROKE_COLOR[3] * 0.8); ellipse(0, 0, this.size * 3.0, this.size * 3.0); noFill(); stroke(255, 255, 255, 100); arc(this.size * -0.5, this.size * -0.5, this.size * 1.5, this.size * 1.5, 180, 270); }
         }
+        // --- Shield and Bubble overlays always shown regardless of appearance ---
+        if (this.activePowerUps['Shield']) { let shieldTimer = this.activePowerUps['Shield']; let shieldAlpha = SHIELD_COLOR[3] * (0.7 + sin(frameCount * 4) * 0.3); if (shieldTimer < 120 && floor(frameCount / 5) % 2 === 0) { shieldAlpha = 0; } fill(SHIELD_COLOR[0], SHIELD_COLOR[1], SHIELD_COLOR[2], shieldAlpha); noStroke(); ellipse(0, 0, this.size * 2.8, this.size * 2.2); }
+        if (this.isBubbled) { let bubbleAlpha = BUBBLE_FILL_COLOR[3] * (0.8 + sin(frameCount * 2) * 0.2); fill(BUBBLE_FILL_COLOR[0], BUBBLE_FILL_COLOR[1], BUBBLE_FILL_COLOR[2], bubbleAlpha); strokeWeight(2); stroke(BUBBLE_STROKE_COLOR[0],BUBBLE_STROKE_COLOR[1],BUBBLE_STROKE_COLOR[2], BUBBLE_STROKE_COLOR[3] * 0.8); ellipse(0, 0, this.size * 3.0, this.size * 3.0); noFill(); stroke(255, 255, 255, 100); arc(this.size * -0.5, this.size * -0.5, this.size * 1.5, this.size * 1.5, 180, 270); }
         pop();
         noStroke();
     }
@@ -1023,6 +1025,12 @@ class Plane {
             if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); }
             return;
         }
+        if (type === 'SummonKingKong') { if (!kingKong) { kingKong = new KingKong(); } if (audioStarted && soundNodesStarted && explosionSoundEnv && explosionNoise) { explosionSoundEnv.play(explosionNoise); } return; }
+        if (type === 'SummonUFO') { for (let i = 0; i < 2; i++) ufos.push(new UfoAlien()); if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); } return; }
+        if (type === 'ElephantStampede') { for (let i = 0; i < 3; i++) elephants.push(new Elephant(true)); if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); } return; }
+        if (type === 'UnicornGallop') { for (let i = 0; i < 2; i++) unicorns.push(new Unicorn(true)); if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); } return; }
+        if (type === 'SummonLivingCloud') { let oppId = (this.id === 1) ? 2 : 1; for (let i = 0; i < 2; i++) livingClouds.push(new LivingCloud(SUMMON_DURATION_FRAMES, oppId)); if (audioStarted && soundNodesStarted && cloudPoofSound && cloudPoofEnv) { cloudPoofEnv.play(cloudPoofSound); } return; }
+        if (type === 'MultiBalloon') { for (let i = 0; i < 2; i++) balloons.push(new Balloon(random(width * 0.1, width * 0.9), random(height * 0.15, height * 0.5), true)); if (audioStarted && soundNodesStarted && powerUpCollectSound && explosionNoise) { powerUpCollectSound.play(explosionNoise); } return; }
         // console.log(`Plane ${this.id} collected ${type}!`);
         this.activePowerUps[type] = POWERUP_DURATION_FRAMES; // Add or refresh timer
 
@@ -1132,8 +1140,8 @@ class BubbleProjectile { // Unchanged from previous version
 // ==========================
 // --- Hot Air Balloon Class --- (Unchanged)
 // ==========================
-class Balloon { constructor(x, y) { this.basePos = createVector(x, y); this.pos = this.basePos.copy(); this.position = this.pos; this.bobbleOffset = 0; this.bobbleSpeed = 0.6; this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.radius = 30; this.visualRadius = 30; this.basketSize = { w: 25, h: 18 }; this.ropeLength = 25; this.isAlive = true; this.respawnTimer = 0; }
-    update() { if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { this.respawn(); } return; } if (!this.isAlive) return; this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; this.basePos.x += this.driftSpeed; if (this.driftSpeed > 0 && this.basePos.x > width + this.visualRadius * 2) { this.basePos.x = -this.visualRadius * 2; } else if (this.driftSpeed < 0 && this.basePos.x < -this.visualRadius * 2) { this.basePos.x = width + this.visualRadius * 2; } this.pos.y = this.basePos.y + this.bobbleOffset; this.pos.x = this.basePos.x; }
+class Balloon { constructor(x, y, temporary = false) { this.basePos = createVector(x, y); this.pos = this.basePos.copy(); this.position = this.pos; this.bobbleOffset = 0; this.bobbleSpeed = 0.6; this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.radius = 30; this.visualRadius = 30; this.basketSize = { w: 25, h: 18 }; this.ropeLength = 25; this.isAlive = true; this.respawnTimer = 0; this.temporary = temporary; this.lifespan = temporary ? SUMMON_DURATION_FRAMES : -1; this.expired = false; }
+    update() { if (this.temporary) { if (this.lifespan > 0) this.lifespan--; else { this.expired = true; return; } } if (this.respawnTimer > 0) { this.respawnTimer--; if (this.respawnTimer <= 0) { if (this.temporary) { this.expired = true; return; } this.respawn(); } return; } if (!this.isAlive) return; this.bobbleOffset = sin(frameCount * this.bobbleSpeed) * 6; this.basePos.x += this.driftSpeed; if (this.driftSpeed > 0 && this.basePos.x > width + this.visualRadius * 2) { this.basePos.x = -this.visualRadius * 2; } else if (this.driftSpeed < 0 && this.basePos.x < -this.visualRadius * 2) { this.basePos.x = width + this.visualRadius * 2; } this.pos.y = this.basePos.y + this.bobbleOffset; this.pos.x = this.basePos.x; }
     display() { if (this.respawnTimer > 0 && !this.isAlive) { if (floor(this.respawnTimer / 8) % 2 !== 0) { return; } } else if (!this.isAlive && this.respawnTimer <= 0) { return; } push(); translate(this.pos.x, this.pos.y); noStroke(); let basketTopY = this.visualRadius * 0.8 + this.ropeLength; let basketBottomY = basketTopY + this.basketSize.h; let basketCenterX = 0; stroke(BALLOON_ROPE); strokeWeight(1.5); line(basketCenterX - this.basketSize.w * 0.4, basketTopY, -this.visualRadius * 0.5, this.visualRadius * 0.7); line(basketCenterX + this.basketSize.w * 0.4, basketTopY, this.visualRadius * 0.5, this.visualRadius * 0.7); line(basketCenterX, basketTopY - 3, 0, this.visualRadius * 0.8); fill(BALLOON_BASKET); rect(basketCenterX, basketTopY + this.basketSize.h / 2, this.basketSize.w, this.basketSize.h, 3); fill(BALLOON_BASKET[0]*0.8, BALLOON_BASKET[1]*0.8, BALLOON_BASKET[2]*0.8); rect(basketCenterX, basketTopY + 2, this.basketSize.w, 4, 2); stroke(BALLOON_BASKET[0]*0.7, BALLOON_BASKET[1]*0.7, BALLOON_BASKET[2]*0.7, 180); strokeWeight(1); for(let i = 1; i < 4; i++){ line(basketCenterX - this.basketSize.w/2, basketTopY + i * (this.basketSize.h/4), basketCenterX + this.basketSize.w/2, basketTopY + i*(this.basketSize.h/4)); } for(let i = 1; i < 5; i++){ line(basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketTopY, basketCenterX - this.basketSize.w/2 + i*(this.basketSize.w/5), basketBottomY); } noStroke(); let numPanels = BALLOON_COLORS.length * 2; for (let i = 0; i < numPanels; i++) { fill(BALLOON_COLORS[i % BALLOON_COLORS.length]); arc(0, 0, this.visualRadius * 2.1, this.visualRadius * 2.3, i * (360.0 / numPanels) - 90 - (360.0/numPanels)*0.1, (i + 1) * (360.0 / numPanels) - 90 + (360.0/numPanels)*0.1, PIE); } noFill(); stroke(255, 255, 255, 30); strokeWeight(this.visualRadius * 0.5); arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, -150, -30); stroke(0, 0, 0, 40); strokeWeight(this.visualRadius * 0.6); arc(0,0, this.visualRadius*1.8, this.visualRadius*2.0, 30, 150); pop(); noStroke(); }
     hit() { if (!this.isAlive) return; this.isAlive = false; this.respawnTimer = BALLOON_RESPAWN_FRAMES; createExplosion(this.pos.x, this.pos.y, 25, EXPLOSION_COLORS.slice(0, 3).concat([BALLOON_BASKET])); let powerUpType = random(POWERUP_TYPES); let newPowerUp = new PowerUp(this.pos.x, this.pos.y, powerUpType); powerUps.push(newPowerUp); if(audioStarted && soundNodesStarted && powerUpSpawnSound && explosionNoise) { powerUpSpawnSound.play(explosionNoise); } }
     respawn() { this.isAlive = true; this.basePos.x = random(width * 0.1, width * 0.9); this.basePos.y = random(height * 0.15, height * 0.55); this.driftSpeed = random(0.1, 0.3) * (random() > 0.5 ? 1 : -1); this.pos = this.basePos.copy(); this.position = this.pos; this.bobbleOffset = 0; }
@@ -1187,6 +1195,12 @@ class PowerUp { constructor(x, y, type) { this.position = createVector(x, y); th
         else if (this.type === 'InvertControls') { fill(this.color); rect(0,0,s*0.85,s*0.85,4); fill(255); noStroke(); triangle(-s*0.18,-s*0.3,s*0.18,-s*0.3,0,-s*0.46); triangle(-s*0.18,s*0.3,s*0.18,s*0.3,0,s*0.46); }
         else if (this.type === 'SlimeBall') { noStroke(); fill(50,200,50); ellipse(0,0,s*0.85,s*0.85); fill(100,240,100); ellipse(-s*0.1,-s*0.2,s*0.38,s*0.35); ellipse(s*0.2,s*0.1,s*0.28,s*0.28); }
         else if (this.type === 'CloudLanding') { noStroke(); fill(180,240,255,220); ellipse(0,0,s*0.9,s*0.65); ellipse(-s*0.32,s*0.1,s*0.5,s*0.42); ellipse(s*0.32,s*0.05,s*0.62,s*0.52); fill(255,255,180); noStroke(); rect(0,s*0.3,s*0.15,s*0.12,1); }
+        else if (this.type === 'MultiBalloon') { noStroke(); fill(230,50,50); ellipse(-s*0.22,s*0.0,s*0.58,s*0.68); fill(50,150,230); ellipse(s*0.2,-s*0.08,s*0.52,s*0.62); fill(BALLOON_BASKET); rect(-s*0.22,s*0.42,s*0.17,s*0.13,1); rect(s*0.2,s*0.36,s*0.17,s*0.13,1); }
+        else if (this.type === 'SummonKingKong') { fill(52,40,30); ellipse(0,-s*0.22,s*0.7,s*0.72); fill(72,52,40); ellipse(0,-s*0.15,s*0.4,s*0.38); fill(42,32,25); rect(-s*0.2,s*0.12,s*0.28,s*0.45,2); rect(s*0.2,s*0.12,s*0.28,s*0.45,2); fill(46,34,27); ellipse(0,-s*0.52,s*0.5,s*0.5); fill(255,100,0); noStroke(); ellipse(-s*0.1,-s*0.58,s*0.1,s*0.1); ellipse(s*0.1,-s*0.58,s*0.1,s*0.1); }
+        else if (this.type === 'SummonUFO') { fill(160,160,190); stroke(200,200,230); strokeWeight(1.5); ellipse(0,s*0.1,s*1.1,s*0.28); noStroke(); fill(90,190,255,160); arc(0,s*0.0,s*0.65,s*0.55,180,360); noStroke(); for(let i=0;i<4;i++){fill(floor((frameCount+i*25)/8)%2===0?color(255,255,0):color(255,120,0)); ellipse(cos(i*90)*s*0.38,s*0.12+sin(i*90)*s*0.05,4,4);} }
+        else if (this.type === 'ElephantStampede') { fill(148,148,158); ellipse(0,-s*0.18,s*0.88,s*0.54); ellipse(s*0.3,-s*0.34,s*0.42,s*0.38); fill(200,162,162); ellipse(s*0.18,-s*0.42,s*0.24,s*0.32); fill(155,155,165); rect(-s*0.18,s*0.12,s*0.14,s*0.36,2); rect(s*0.05,s*0.12,s*0.14,s*0.36,2); noFill(); stroke(148,148,158); strokeWeight(s*0.1); beginShape(); curveVertex(s*0.38,-s*0.12); curveVertex(s*0.5,s*0.08); curveVertex(s*0.52,s*0.22); endShape(); }
+        else if (this.type === 'UnicornGallop') { fill(252,247,255); ellipse(0,-s*0.22,s*0.85,s*0.48); fill(248,243,255); ellipse(s*0.32,-s*0.38,s*0.3,s*0.26); for(let i=0;i<3;i++){stroke(RAINBOW_COLORS[i*2]);strokeWeight(2.2);noFill();arc(s*0.2+i*2,-s*0.38-i*2,s*0.18+i*3,s*0.24+i*2,180,360);} noStroke(); fill(255,225,255); stroke(RAINBOW_COLORS[0]); strokeWeight(1); triangle(s*0.27,-s*0.5,s*0.33,-s*0.5,s*0.3,-s*0.66); noStroke(); fill(155,155,165); rect(-s*0.18,s*0.12,s*0.14,s*0.36,2); rect(s*0.05,s*0.12,s*0.14,s*0.36,2); }
+        else if (this.type === 'SummonLivingCloud') { fill(208,198,212,220); ellipse(0,0,s*0.9,s*0.65); ellipse(-s*0.3,s*0.08,s*0.55,s*0.42); ellipse(s*0.3,s*0.05,s*0.6,s*0.5); noStroke(); fill(28,18,18); ellipse(-s*0.12,-s*0.04,s*0.08,s*0.06); ellipse(s*0.12,-s*0.04,s*0.08,s*0.06); stroke(28,18,18); strokeWeight(1.8); noFill(); arc(0,s*0.08,s*0.18,s*0.1,180,360); }
         else { rect(0, 0, s, s); } // Default box
         pop(); noStroke(); }
     isOffscreen() { return this.lifespan <= 0 || this.position.y > height + this.size * 2; }
@@ -1257,8 +1271,9 @@ class BgRainbow {
 // --- UfoAlien Class ---
 // ============================
 class UfoAlien {
-    constructor() { this.pos = createVector(random(width * 0.1, width * 0.9), random(height * 0.05, height * 0.4)); this.vel = createVector(random(-UFO_SPEED, UFO_SPEED), random(-0.3, 0.3)); if (abs(this.vel.x) < 0.5) this.vel.x = UFO_SPEED; this.bobOffset = random(100); this.shootCooldown = random(UFO_SHOOT_COOLDOWN); this.size = 38; this.glowPhase = random(100); }
+    constructor() { this.pos = createVector(random(width * 0.1, width * 0.9), random(height * 0.05, height * 0.4)); this.vel = createVector(random(-UFO_SPEED, UFO_SPEED), random(-0.3, 0.3)); if (abs(this.vel.x) < 0.5) this.vel.x = UFO_SPEED; this.bobOffset = random(100); this.shootCooldown = random(UFO_SHOOT_COOLDOWN); this.size = 38; this.glowPhase = random(100); this.lifespan = SUMMON_DURATION_FRAMES; this.expired = false; }
     update() {
+        this.lifespan--; if (this.lifespan <= 0) { this.expired = true; return; }
         this.pos.x += this.vel.x;
         this.pos.y += this.vel.y + sin(frameCount * 0.04 + this.bobOffset) * 0.4;
         if (this.pos.x < this.size || this.pos.x > width - this.size) this.vel.x *= -1;
@@ -1269,7 +1284,7 @@ class UfoAlien {
             this.shootCooldown = UFO_SHOOT_COOLDOWN + random(-40, 40);
             let target = null; let minDist = Infinity;
             for (let p of [plane1, plane2]) { if (p.isAlive) { let d = dist(this.pos.x, this.pos.y, p.position.x, p.position.y); if (d < minDist) { minDist = d; target = p; } } }
-            if (target) { let angle = atan2(target.position.y - this.pos.y, target.position.x - this.pos.x); /* degrees in DEGREES mode */ ufoBullets.push(new UfoBullet(this.pos.x, this.pos.y + 8, angle)); }
+            if (target) { let angle = degrees(atan2(target.position.y - this.pos.y, target.position.x - this.pos.x)); ufoBullets.push(new UfoBullet(this.pos.x, this.pos.y + 8, angle)); }
         }
     }
     display() {
@@ -1309,10 +1324,11 @@ class UfoBullet {
 // --- Elephant Class ---
 // ============================
 class Elephant {
-    constructor() { this.size = random(38, 58); this.speed = random(0.5, 1.4); this.dir = random() > 0.5 ? 1 : -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2; this.y = GROUND_Y; this.fc = random(200); }
+    constructor(summoned = false) { this.size = random(38, 58); this.speed = random(0.5, 1.4); this.dir = random() > 0.5 ? 1 : -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2; this.y = GROUND_Y; this.fc = random(200); this.summoned = summoned; this.expired = false; }
     update() {
         this.x += this.speed * this.dir; this.fc++;
         if ((this.dir > 0 && this.x > width + this.size * 3) || (this.dir < 0 && this.x < -this.size * 3)) {
+            if (this.summoned) { this.expired = true; return; }
             this.dir *= -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2;
             this.size = random(38, 58); this.speed = random(0.5, 1.4);
         }
@@ -1341,8 +1357,9 @@ class Elephant {
 // --- KingKong Class ---
 // ============================
 class KingKong {
-    constructor() { this.baseX = width * 0.85; this.x = this.baseX; this.y = GROUND_Y; this.size = 85; this.walkDir = 1; this.walkRange = 80; this.armSwing = 0; this.chestBeat = 0; this.chestBeatTimer = 0; this.roarTimer = 0; }
+    constructor() { this.baseX = width * 0.5; this.x = this.baseX; this.y = GROUND_Y; this.size = 85; this.walkDir = 1; this.walkRange = 80; this.armSwing = 0; this.chestBeat = 0; this.chestBeatTimer = 0; this.roarTimer = 0; this.lifespan = SUMMON_DURATION_FRAMES; this.expired = false; }
     update() {
+        this.lifespan--; if (this.lifespan <= 0) { this.expired = true; return; }
         this.x += this.walkDir * 0.28;
         if (this.x > this.baseX + this.walkRange) this.walkDir = -1;
         if (this.x < this.baseX - this.walkRange) this.walkDir = 1;
@@ -1381,11 +1398,13 @@ class KingKong {
 // --- LivingCloud Class ---
 // ============================
 class LivingCloud {
-    constructor() { this.pos = createVector(random(width * 0.05, width * 0.95), random(height * 0.05, height * 0.52)); this.size = random(95, 155); this.puffOffsets = []; this.numPuffs = floor(random(5, 9)); this.opacity = 195; this.speed = 0.4; this.generatePuffs(); }
+    constructor(lifespan, targetOpponentId = 0) { this.pos = createVector(random(width * 0.05, width * 0.95), random(height * 0.05, height * 0.52)); this.size = random(95, 155); this.puffOffsets = []; this.numPuffs = floor(random(5, 9)); this.opacity = 195; this.speed = 0.4; this.lifespan = lifespan || SUMMON_DURATION_FRAMES; this.expired = false; this.targetOpponentId = targetOpponentId; this.generatePuffs(); }
     generatePuffs() { this.puffOffsets = []; for (let i = 0; i < this.numPuffs; i++) { this.puffOffsets.push({ x: random(-this.size*0.62, this.size*0.62), y: random(-this.size*0.25, this.size*0.25), r: random(this.size*0.38, this.size*0.78) }); } }
     update() {
+        this.lifespan--; if (this.lifespan <= 0) { this.expired = true; return; }
         let nearestDist = Infinity; let target = null;
-        for (let p of [plane1, plane2]) { if (p.isAlive) { let d = dist(this.pos.x, this.pos.y, p.position.x, p.position.y); if (d < nearestDist) { nearestDist = d; target = p; } } }
+        for (let p of [plane1, plane2]) { if (p.isAlive) { if (this.targetOpponentId && p.id !== this.targetOpponentId) continue; let d = dist(this.pos.x, this.pos.y, p.position.x, p.position.y); if (d < nearestDist) { nearestDist = d; target = p; } } }
+        if (!target) { for (let p of [plane1, plane2]) { if (p.isAlive) { let d = dist(this.pos.x, this.pos.y, p.position.x, p.position.y); if (d < nearestDist) { nearestDist = d; target = p; } } } }
         if (target) { let dir = p5.Vector.sub(target.position, this.pos).normalize().mult(this.speed * 0.28); this.pos.add(dir); }
         for (let plane of [plane1, plane2]) {
             if (plane.isAlive && !plane.activePowerUps['CloudDisguise'] && !plane.activePowerUps['CloudLanding']) {
@@ -1410,7 +1429,7 @@ class LivingCloud {
         stroke(28, 18, 18); strokeWeight(2.2);
         line(-this.size*0.22, ey-this.size*0.07, -this.size*0.09, ey-this.size*0.038);
         line(this.size*0.09, ey-this.size*0.038, this.size*0.22, ey-this.size*0.07);
-        noFill(); arc(0, ey+this.size*0.1, this.size*0.22, this.size*0.14, 0, 180);
+        noFill(); arc(0, ey+this.size*0.1, this.size*0.22, this.size*0.14, 180, 360);
         pop(); noStroke();
     }
 }
@@ -1419,10 +1438,11 @@ class LivingCloud {
 // --- Unicorn Class ---
 // ============================
 class Unicorn {
-    constructor() { this.size = random(28, 42); this.speed = random(1.6, 3.2); this.dir = random() > 0.5 ? 1 : -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2; this.y = GROUND_Y; this.fc = random(200); this.rainbowTrail = []; }
+    constructor(summoned = false) { this.size = random(28, 42); this.speed = random(1.6, 3.2); this.dir = random() > 0.5 ? 1 : -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2; this.y = GROUND_Y; this.fc = random(200); this.rainbowTrail = []; this.summoned = summoned; this.expired = false; }
     update() {
         this.x += this.speed * this.dir; this.fc++;
         if ((this.dir > 0 && this.x > width + this.size * 3) || (this.dir < 0 && this.x < -this.size * 3)) {
+            if (this.summoned) { this.expired = true; return; }
             this.dir *= -1; this.x = this.dir > 0 ? -this.size * 2 : width + this.size * 2;
             this.size = random(28, 42); this.speed = random(1.6, 3.2);
         }
